@@ -9,6 +9,12 @@ project(hello_wayland C)
 # ---------------------------------------------------------------------------
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
+# xkbcommon: translates raw keyboard scancodes into symbols using the
+# keymap the compositor sends us. Keyboard input is unusable without it.
+pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
+# wayland-cursor: loads the XCursor theme from disk and wraps the images
+# in wl_buffers -- the cursor itself is just another surface + buffer.
+pkg_check_modules(WAYLAND_CURSOR REQUIRED IMPORTED_TARGET wayland-cursor)
 
 pkg_get_variable(WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
 pkg_get_variable(WAYLAND_SCANNER wayland-scanner wayland_scanner)
@@ -45,4 +51,5 @@ add_executable(hello_wayland
 
 # So that #include "xdg-shell-client-protocol.h" finds the generated header.
 target_include_directories(hello_wayland PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(hello_wayland PRIVATE PkgConfig::WAYLAND_CLIENT)
+target_link_libraries(hello_wayland PRIVATE PkgConfig::WAYLAND_CLIENT PkgConfig::XKBCOMMON
+                                            PkgConfig::WAYLAND_CURSOR)

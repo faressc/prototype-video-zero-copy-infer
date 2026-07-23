@@ -87,7 +87,53 @@ Implementation in [main.c](main.c): `on_toplevel_configure` **stages** `pending_
 - **Resize strategy:** a size change builds a **fresh memfd + pool** with new slot buffers; old buffers still on loan become *orphans*, destroyed in the release callback (`slot->buffer != released buffer` → orphan). Growing one pool in place (`wl_shm_pool.resize` exists) can't safely reuse offsets while old buffers are on loan — that needs real region allocation — so per-size pools are the simple correct choice (GTK/Chromium effectively do the same: pool per buffer). Steady state allocates **nothing**: measured, 2 resizes → 2 pools + 4 buffers total, then 60 fps with no further allocation.
 - **Why destroying the pool immediately is legal:** the pool object is only a *factory*. Spec (`wl_shm_pool.create_buffer`): "A buffer will keep a reference to the pool it was created from, so it is valid to destroy the pool immediately after creating a buffer from it." Three independent refcount layers keep the pixels alive: protocol (pool + each buffer reference the storage server-side), process (each side's mmap), kernel (memfd pages live while any fd *or* mapping exists — why both sides `close()` the fd right after mapping). "Destroy the pool" means "done creating buffers," never "free the pixels."
 
-## 7. Buffering & flushing
+## 7. Input: the wl_seat
+
+One **seat** = one user: a bundle of pointer + keyboard (+ touch) capabilities. Bind it (finally using the version argument: `min(server_version, 5)` — v5 gives pointer frame batching), listen for `capabilities`, and call `get_pointer` / `get_keyboard` for the bits present. Capabilities are **dynamic** — unplug the mouse and the event fires again without that bit, so handle both get and release.
+
+- **Keyboard scancodes are raw** — interpreting them takes the compositor-distributed keymap plus xkbcommon; full walkthrough in §9.
+- **Pointer events are batched** (since v5): enter/motion/axis of one hardware event arrive together, terminated by `wl_pointer.frame` — the stage/apply transaction pattern a third time, now compositor → client. Implemented properly in [main.c](main.c): the event handlers only *stage* into a `struct pointer_event` (axis values summed), and `on_pointer_frame` *applies* the batch atomically and clears it — that's what keeps a diagonal touchpad scroll one gesture instead of an L-shaped pair. Coordinates are surface-local `wl_fixed_t` (24.8 fixed point). Exception: `set_cursor` stays in the enter handler — it's a protocol *reply* to the enter (like pong answers ping), not application state.
+- **The cursor inside your window is your responsibility** — no server-side default; see §8.
+- **Input serials authorize privileged requests.** `xdg_toplevel_move(seat, serial)` quotes the button-press serial — proof of fresh user intent; the compositor rejects stale serials, so apps can't fling windows around spontaneously. (Same pattern authorizes clipboard access and popup grabs.)
+
+In [main.c](main.c): pointer position steers the gradient origin, left-drag hands the window move to the compositor, scroll scales the animation clock (through zero into reverse), Space pauses, Esc/Q quits.
+
+## 8. The cursor: just another surface
+
+Why the client must provide it: cursor *appearance* is contextual (I-beam over text, resize arrows at edges) and only the client knows what's under the pointer inside its window — the compositor sees an opaque buffer and never guesses semantics. (X11's default-then-override model caused the classic wrong-shape flicker.) *Positioning* is mechanical, global, latency-critical → compositor's job.
+
+The pipeline, reusing everything already learned:
+
+1. **XCursor theme files** on disk (`/usr/share/icons/<theme>/cursors/`) hold pre-rendered ARGB images + per-image **hotspot** (which pixel is the logical tip).
+2. **libwayland-cursor is a "little us"**: it builds its own memfd pool and wraps the images as ordinary `wl_buffer`s (the whole library exports six functions). `wl_cursor_image_get_buffer()` returns one lazily.
+3. We **attach + damage + commit once** to a dedicated `wl_surface` — identical protocol to window content, executed a single time at startup.
+4. `wl_pointer.set_cursor(enter_serial, surface, hotspot_x, hotspot_y)` assigns the surface the **cursor role** (the pointer-world sibling of xdg_toplevel). From then on the **compositor** places it at `pointer − hotspot` on every hardware motion — the client is out of the loop entirely (a frozen app's cursor still moves).
+5. Scanout: compositors put the image on the **hardware cursor plane** — a tiny ARGB overlay the display controller composites *during scanout* — so mouse movement causes no GPU repaint and no damage at all.
+
+Key facts:
+
+- **How the compositor finds the pixels:** no search — `set_cursor` carries the surface ID; the surface's committed state references the buffer → pool → already-mapped pages. Same object-graph walk as window content.
+- **Attach-before-role is legal** for a plain `wl_surface`: the committed buffer sits dormant on an unmapped surface until `set_cursor` maps it — nothing to negotiate, so no configure handshake. Contrast xdg_surface, where a buffer attached or committed before the first configure/ack is a **protocol error** — the role determines the contract; the surface is just the vessel.
+- **The enter serial gates it:** only the client currently under the pointer can change the shape — a background window quoting a stale serial is ignored.
+- **Animated cursors** are `images[1..n]` with per-frame delays; animating them is the client's job (frame 0 only here). `set_cursor(serial, NULL, 0, 0)` hides the cursor.
+- **cursor-shape-v1** (Hyprland offers it) is the modern shortcut for the 90% case: name a shape (`DEFAULT`, `TEXT`, …) and the compositor themes, scales, and animates it — steps 1–3 vanish.
+
+## 9. The keyboard, step by step
+
+The five event types arrive in a deliberate order after `wl_seat.get_keyboard`:
+
+1. **`keymap(format, fd, size)`** — the memfd trick in reverse: the compositor keeps the compiled xkb keymap (physical key → symbols, modifier behavior, layout groups) in a memory file; every client maps the same read-only copy. We `mmap` + `xkb_keymap_new_from_string` + `xkb_state_new`, then unmap/close. Replace, don't create-once — a layout switch just re-sends the event. Wayland refuses to interpret keys itself: layout is *policy*, pushed to the client; the compositor only distributes the ground truth as data.
+2. **`repeat_info(rate, delay)`** — information, not behavior. Held keys do **not** auto-repeat on the wire (one press, one release); a real app arms a timer from these values. Skipped here.
+3. **`enter(serial, surface, keys[])`** — keyboard focus; only now do key events reach us. The security departure from X11: no grabs, no sniffing — events go to the focused surface, full stop (why keyloggers and naive global hotkeys don't work on Wayland). `keys[]` lists keys already held at focus time.
+4. **`modifiers(depressed, latched, locked, group)`** — mirrored into `xkb_state_update_mask`, *not* deduced from key events: we can't deduce it, since the compositor consumes some keys for its own binds (Super combos never reach clients) yet modifier truth must stay authoritative.
+5. **`key(serial, time, scancode, state)`** — raw evdev scancode (position, not meaning). Translation: `scancode + 8` (fossilized X11 offset: X reserved codes 0–7) → `xkb_state_key_get_one_sym` consults keymap + modifier state → keysym (`q` vs `Q` vs whatever the layout puts there). Key serials authorize e.g. `set_selection` — clipboard claims must answer a real keypress.
+6. **`leave`** — implies *all keys released*; no per-key releases follow. Apps holding pressed-key state must clear it here or keys "stick" (hold W in a game, alt-tab away → runs forward forever).
+
+The distilled pattern: **keymap = shared data (fd) · state = mirrored events (modifiers) · meaning = client-side computation (xkbcommon) · focus = security boundary (enter/leave) · repeat = client duty (repeat_info)**.
+
+Beyond this lies *text input*: keysym-per-keypress works for shortcuts but is not typing — dead keys need `xkb_compose`, CJK/emoji need an IME via `text-input-v3`, where the compositor delivers composed strings and key events stop being the source of text. That layer is where toolkits earn their keep.
+
+## 10. Buffering & flushing
 
 Requests are mail written but not posted. `wl_proxy_marshal_flags` only appends to a ~4 KB output buffer; the actual `write()` happens at exactly four points:
 
@@ -98,11 +144,11 @@ Requests are mail written but not posted. `wl_proxy_marshal_flags` only appends 
 
 In this program: *nothing* is sent until the roundtrip (write #1: `get_registry` + `sync` together); the entire surface/role/title/commit batch sits buffered until the first `dispatch` (write #2). Rationale: syscall batching. Footgun: `wl_display_disconnect` does **not** flush.
 
-## 8. Marshalling
+## 11. Marshalling
 
 Converting a typed C call into bytes for the socket (unmarshalling = reverse). Wire format, all 32-bit words: `[object id][size<<16 | opcode][args…]`. Opcode = position of the request in the XML (`xdg_toplevel.set_title` = 2). Strings: length incl. NUL, then bytes, padded to 4. The variadic marshaller can't see C types — it follows the **signature string** from the generated tables (`"s"` = string, `"no"` = new id + object, `"u"` = uint). File descriptors are *not* in the byte stream: they ride as `SCM_RIGHTS` ancillary data and the kernel translates them into the receiver's fd table — why wl_shm needs a Unix socket.
 
-## 9. Looking things up
+## 12. Looking things up
 
 | Question | Tool |
 | --- | --- |
@@ -112,6 +158,6 @@ Converting a typed C call into bytes for the socket (unmarshalling = reverse). W
 
 Ops are **never transmitted**: the wire is bare `[id, opcode, args]` with no self-description (contrast D-Bus). Both sides compile in the same tables; the version number is the only negotiation. `wl_registry_bind(…, version)` picks the version *you* speak — this app binds `xdg_wm_base` v1 though Hyprland offers v7, so it never receives ≥v2 events. Binding `min(server_version, version_you_support)` is how you opt into more.
 
-## 10. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+## 13. Build wiring ([CMakeLists.txt](CMakeLists.txt))
 
-`pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into the build dir; both compile into the executable alongside `main.c`.
+`pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into the build dir; both compile into the executable alongside `main.c`. Input added two ordinary libraries: `xkbcommon` (keymap compilation, scancode → keysym) and `wayland-cursor` (XCursor theme loading → wl_buffers).
