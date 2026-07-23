@@ -10,7 +10,10 @@
             "request": "launch",
             "program": "${workspaceRoot}/build/hello_wayland",
             "args": [],
-            "cwd": "${workspaceRoot}"
+            "cwd": "${workspaceRoot}",
+            "env": {
+                "WAYLAND_DEBUG": "1"
+            }
         }
     ]
 }

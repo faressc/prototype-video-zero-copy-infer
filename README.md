@@ -1,7 +1,7 @@
 # hello_wayland — notes
 
-The smallest honest Wayland window ([main.c](main.c)), plus everything learned while dissecting it.
-The whole program is one four-beat pipeline: **role → configure/ack → buffer → commit**.
+The smallest honest Wayland window ([main.c](main.c)) — now with a continuously animated gradient — plus everything learned while dissecting it.
+The core is still one four-beat pipeline: **role → configure/ack → buffer → commit**, with a frame-callback render loop (§6) on top.
 
 ## 1. Where the xdg-shell symbols live
 
@@ -52,8 +52,8 @@ Two special objects:
 5. **Role** — the xdg-shell extension stacks `xdg_surface` ("participates in desktop windowing") then `xdg_toplevel` ("is a normal window"; alternative: `xdg_popup`) on the surface. `set_title`, `set_app_id` (what compositor window rules match).
 6. **First commit — empty.** Surface state is double-buffered protocol-side; `commit` applies pending state atomically. Committing *without* a buffer means "role assigned, please configure me". Attaching a buffer before the handshake is a protocol error.
 7. **Configure/ack** — reply arrives as `xdg_toplevel.configure` (stages size + states into `pending_w/h`) then `xdg_surface.configure` (serial): ack first, *then* draw at the staged size, attach, commit. Details in §5. This second commit is the **mapping moment**: the window appears.
-8. **Buffer (wl_shm)** — pixels never go through the socket (~900 KB/frame). Instead: `memfd_create` → `ftruncate` → `mmap` → draw → `wl_shm_create_pool(fd, …)` passes **the fd itself**; compositor maps the same pages. Zero copy. Pool/fd can be dropped immediately — the compositor holds its own reference. GPU path (dmabuf) = same fd trick, GPU memory.
-9. **Event loop** — `wl_display_dispatch`: flush, block, read, run listeners, repeat. Everything after setup happens inside callbacks.
+8. **Buffers (wl_shm)** — pixels never go through the socket (~4 MB/frame). Instead: `memfd_create` → `ftruncate` → `mmap` → `wl_shm_create_pool(fd, …)` passes **the fd itself**; compositor maps the same pages. Zero copy. One pool holds `SLOTS` buffers side by side; because the memory is shared, a committed buffer is **on loan** until `wl_buffer.release` — hence ≥2 buffers (§6). GPU path (dmabuf) = same fd trick, GPU memory.
+9. **Event loop** — `wl_display_dispatch`: flush, block, read, run listeners, repeat. Everything after setup happens inside callbacks; each `wl_surface.frame` callback draws the next gradient frame (§6).
 10. **Close** — `xdg_toplevel.close` is a request, not a kill. Teardown destroys in reverse creation order.
 
 ## 5. The configure/ack contract in detail
@@ -74,11 +74,20 @@ compositor                              client
 - **Width/height 0 means "you pick"** — typical for the very first configure (the reply to the empty commit); fall back to your own default.
 - Under a fast resize drag you may **skip intermediate configures** and ack only the latest — acking N implies everything ≤ N. A commit with no new ack means "still the old state" (every ordinary frame is exactly that).
 - **The first configure is gated:** attaching a buffer before acking it is a protocol error — the compositor gets to state constraints ("start maximized") before the window ever shows.
-- **Buffer lifetime:** one buffer per configure means old ones must be freed — but only after `wl_buffer.release` says the compositor stopped reading (it maps the same memory). Hence the release listener → `wl_buffer_destroy`.
+- **Buffer lifetime:** a committed buffer may not be freed (or drawn into!) until `wl_buffer.release` says the compositor stopped reading — it maps the same memory. Details in §6.
 
-Implementation in [main.c](main.c): `on_toplevel_configure` **stages** `pending_w/h` into the state struct (nothing applied); `on_xdg_surface_configure` acks, then draws at the staged size — the single point where the batch is consumed.
+Implementation in [main.c](main.c): `on_toplevel_configure` **stages** `pending_w/h` into the state struct (nothing applied); `on_xdg_surface_configure` acks, recreates the buffers if the size changed, then draws at the staged size — the single point where the batch is consumed.
 
-## 6. Buffering & flushing
+## 6. Continuous rendering: frame callbacks & double buffering
+
+- **Pacing: never draw on a timer.** Request `wl_surface.frame` before each commit; the compositor fires the one-shot callback when a new frame is worthwhile (window visible, display about to refresh). Occluded window → no callbacks → zero CPU. The callback's ms timestamp drives the animation, so motion stays display-synced even across skipped frames. Loop: `done` → destroy callback → request next → draw → commit.
+- **Why ≥ 2 buffers:** shared memory means a committed buffer is *on loan* — drawing into it before `release` is a visible race. So draw into slot B while slot A is on screen.
+- **Double vs triple:** with frame-callback pacing and a compositor that returns buffers promptly (wlroots/Hyprland copies shm to a GPU texture at commit, then releases), 2 slots ping-pong cleanly. If both are ever busy when the callback fires, `render()` skips that frame; `SLOTS = 3` makes skips impossible at the cost of one more buffer. Measured here: 181 frames / 181 attaches / 181 releases in 3 s — zero skips, double buffering suffices.
+- **Damage:** `wl_surface_damage_buffer(0, 0, INT32_MAX, INT32_MAX)` every frame — attach alone doesn't tell the compositor what changed (the reason `wl_compositor` is bound at ≥ v4).
+- **Resize strategy:** a size change builds a **fresh memfd + pool** with new slot buffers; old buffers still on loan become *orphans*, destroyed in the release callback (`slot->buffer != released buffer` → orphan). Growing one pool in place (`wl_shm_pool.resize` exists) can't safely reuse offsets while old buffers are on loan — that needs real region allocation — so per-size pools are the simple correct choice (GTK/Chromium effectively do the same: pool per buffer). Steady state allocates **nothing**: measured, 2 resizes → 2 pools + 4 buffers total, then 60 fps with no further allocation.
+- **Why destroying the pool immediately is legal:** the pool object is only a *factory*. Spec (`wl_shm_pool.create_buffer`): "A buffer will keep a reference to the pool it was created from, so it is valid to destroy the pool immediately after creating a buffer from it." Three independent refcount layers keep the pixels alive: protocol (pool + each buffer reference the storage server-side), process (each side's mmap), kernel (memfd pages live while any fd *or* mapping exists — why both sides `close()` the fd right after mapping). "Destroy the pool" means "done creating buffers," never "free the pixels."
+
+## 7. Buffering & flushing
 
 Requests are mail written but not posted. `wl_proxy_marshal_flags` only appends to a ~4 KB output buffer; the actual `write()` happens at exactly four points:
 
@@ -89,11 +98,11 @@ Requests are mail written but not posted. `wl_proxy_marshal_flags` only appends 
 
 In this program: *nothing* is sent until the roundtrip (write #1: `get_registry` + `sync` together); the entire surface/role/title/commit batch sits buffered until the first `dispatch` (write #2). Rationale: syscall batching. Footgun: `wl_display_disconnect` does **not** flush.
 
-## 7. Marshalling
+## 8. Marshalling
 
 Converting a typed C call into bytes for the socket (unmarshalling = reverse). Wire format, all 32-bit words: `[object id][size<<16 | opcode][args…]`. Opcode = position of the request in the XML (`xdg_toplevel.set_title` = 2). Strings: length incl. NUL, then bytes, padded to 4. The variadic marshaller can't see C types — it follows the **signature string** from the generated tables (`"s"` = string, `"no"` = new id + object, `"u"` = uint). File descriptors are *not* in the byte stream: they ride as `SCM_RIGHTS` ancillary data and the kernel translates them into the receiver's fd table — why wl_shm needs a Unix socket.
 
-## 8. Looking things up
+## 9. Looking things up
 
 | Question | Tool |
 | --- | --- |
@@ -103,6 +112,6 @@ Converting a typed C call into bytes for the socket (unmarshalling = reverse). W
 
 Ops are **never transmitted**: the wire is bare `[id, opcode, args]` with no self-description (contrast D-Bus). Both sides compile in the same tables; the version number is the only negotiation. `wl_registry_bind(…, version)` picks the version *you* speak — this app binds `xdg_wm_base` v1 though Hyprland offers v7, so it never receives ≥v2 events. Binding `min(server_version, version_you_support)` is how you opt into more.
 
-## 9. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+## 10. Build wiring ([CMakeLists.txt](CMakeLists.txt))
 
 `pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into the build dir; both compile into the executable alongside `main.c`.

@@ -1,12 +1,19 @@
-/* hello_wayland: the smallest honest Wayland window.
+/* hello_wayland: the smallest honest Wayland window -- now animated.
  *
- * The whole program is the four-step pipeline:
+ * Still the same four-step pipeline:
  *
  *   role -> configure/ack handshake -> buffer -> commit
  *
+ * plus the pieces a real client adds on top:
+ *
+ *   - a continuous render loop paced by wl_surface.frame callbacks
+ *   - double buffering: SLOTS buffers reused via wl_buffer.release
+ *   - resize = fresh pool + fresh slot buffers; buffers still on loan
+ *     to the compositor end their lives as orphans, destroyed once
+ *     the release event arrives
+ *
  * Reading order: main() at the bottom, then jump to each callback
- * as it is mentioned. Written in plain C so every protocol step is
- * visible; no wrapper classes hiding anything.
+ * as it is mentioned.
  */
 
 #define _GNU_SOURCE /* for memfd_create */
@@ -25,8 +32,16 @@
 
 enum { WIDTH = 640, HEIGHT = 360 }; /* fallback size when the compositor has no opinion */
 
-/* All state in one struct. This plays the role of your WaylandCore's
- * members; the "void* data" of every listener points here. */
+/* Double buffering: one buffer on screen, one being drawn. Bump to 3
+ * (triple buffering) if a compositor ever holds buffers long enough
+ * that render() has to skip frames. */
+enum { SLOTS = 2 };
+
+struct slot {
+    struct wl_buffer* buffer; /* this slot's CURRENT protocol object */
+    int busy;                 /* committed and not yet released by the compositor */
+};
+
 struct state {
     /* connection + introduction phase */
     struct wl_display* display;
@@ -40,18 +55,29 @@ struct state {
     struct xdg_surface* xdg_surface;
     struct xdg_toplevel* toplevel;
 
-    int running;
+    /* Pixel storage: ONE pool holding SLOTS buffers side by side,
+     * recreated only when the size changes. Steady-state animation
+     * allocates nothing -- the slots ping-pong forever. */
+    struct wl_shm_pool* pool;
+    uint32_t* pool_data; /* our mapping of the whole pool */
+    size_t pool_bytes;
+    struct slot slots[SLOTS];
+    int buf_w, buf_h; /* size the slot buffers are currently created at */
 
     /* Window size. STAGED by xdg_toplevel.configure (data, no serial),
      * CONSUMED when we ack in xdg_surface.configure (serial, no data).
      * The compositor sends 0 for "you pick" -> fall back to WIDTH/HEIGHT. */
     int pending_w;
     int pending_h;
+
+    uint32_t last_time; /* timestamp (ms) of the last frame callback */
+    int animating;      /* frame-callback loop started? */
+    int running;
 };
 
 /* ------------------------------------------------------------------ */
-/* Step 0: the introduction phase. Identical in spirit to your        */
-/* WaylandCore::on_global: read the menu, order what we need.         */
+/* Step 0: the introduction phase -- read the menu, order what we     */
+/* need.                                                              */
 /* ------------------------------------------------------------------ */
 
 static void on_global(void* data,
@@ -63,6 +89,7 @@ static void on_global(void* data,
     (void)version;
 
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
+        /* v4: needed for wl_surface.damage_buffer below */
         st->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         st->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
@@ -93,67 +120,160 @@ static const struct xdg_wm_base_listener wm_base_listener = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Step 3 (the buffer): pixel memory the compositor can see.          */
+/* Step 3 (the buffers): pixel memory the compositor can see.         */
 /*                                                                    */
-/* wl_shm works like this: we create a plain memory file (memfd),     */
-/* mmap it, draw into it, and pass the fd over the socket. Compositor */
-/* maps the same file -> both sides see the same pixels, zero copy.   */
-/* (Your zcc uses dmabuf: same idea, but GPU memory instead of RAM.)  */
+/* wl_shm: we create a plain memory file (memfd), mmap it, draw into  */
+/* it, and pass the fd over the socket. The compositor maps the same  */
+/* file -> both sides see the same pixels, zero copy. Because of that */
+/* sharing, a committed buffer is ON LOAN: we may not draw into it    */
+/* again until the compositor returns it with wl_buffer.release.      */
+/* Hence SLOTS buffers: draw into a free one while another is on      */
+/* screen.                                                            */
 /* ------------------------------------------------------------------ */
 
-/* Buffer lifetime: we create a fresh buffer per configure, so old ones
- * must be freed -- but only once the compositor is done reading (it maps
- * the same memory!). It says so with the release event. */
+/* release: the compositor stopped reading this buffer. If it is still
+ * a slot's current buffer, the slot is simply free again. If a resize
+ * replaced it meanwhile, it is an orphan -- destroy it now. (We could
+ * not destroy it earlier: the compositor was still reading the pages.) */
 static void on_buffer_release(void* data, struct wl_buffer* buffer) {
-    (void)data;
-    wl_buffer_destroy(buffer);
+    struct slot* s = data;
+    if (s->buffer == buffer) {
+        s->busy = 0;
+    } else {
+        wl_buffer_destroy(buffer);
+    }
 }
 
 static const struct wl_buffer_listener buffer_listener = {
     .release = on_buffer_release,
 };
 
-static struct wl_buffer* draw_frame(struct state* st) {
+/* Make pool + slot buffers exist at pending_w x pending_h. A resize
+ * gets a FRESH pool instead of growing the old one in place: reusing
+ * offsets in a grown pool could overlap a buffer the compositor is
+ * still reading (one torn frame). Destroying the old pool object
+ * immediately is explicitly legal -- each buffer keeps a reference to
+ * its pool, so the storage lives until the last buffer dies. */
+static void ensure_buffers(struct state* st) {
     const int w = st->pending_w;
     const int h = st->pending_h;
-    const int stride = w * 4; /* 4 bytes per pixel: XRGB8888 */
-    const int size = stride * h;
+    if (st->pool && w == st->buf_w && h == st->buf_h) { return; }
+
+    for (int i = 0; i < SLOTS; i++) {
+        /* Free slots die now; busy ones become orphans for on_buffer_release. */
+        if (st->slots[i].buffer && !st->slots[i].busy) { wl_buffer_destroy(st->slots[i].buffer); }
+    }
+    if (st->pool) {
+        wl_shm_pool_destroy(st->pool);
+        munmap(st->pool_data, st->pool_bytes);
+    }
+
+    const size_t slot_bytes = (size_t)w * 4 * h; /* 4 bytes per pixel: XRGB8888 */
+    st->pool_bytes = slot_bytes * SLOTS;
 
     int fd = memfd_create("hello-wayland", 0);
-    if (fd < 0 || ftruncate(fd, size) < 0) {
+    if (fd < 0 || ftruncate(fd, (off_t)st->pool_bytes) < 0) {
         perror("shm alloc");
         exit(1);
     }
-
-    uint32_t* pixels = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (pixels == MAP_FAILED) {
+    st->pool_data = mmap(NULL, st->pool_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (st->pool_data == MAP_FAILED) {
         perror("mmap");
         exit(1);
     }
+    st->pool = wl_shm_create_pool(st->shm, fd, (int32_t)st->pool_bytes);
+    close(fd); /* mappings + pool keep the pages alive; the fd may go */
 
-    /* The actual "rendering": fill with one color. 0x00RRGGBB. */
-    for (int i = 0; i < w * h; i++) { pixels[i] = 0x00870299; /* a calm teal */ }
-    munmap(pixels, size);
+    for (int i = 0; i < SLOTS; i++) {
+        st->slots[i].buffer = wl_shm_pool_create_buffer(st->pool,
+                                                        (int32_t)(i * slot_bytes),
+                                                        w,
+                                                        h,
+                                                        w * 4,
+                                                        WL_SHM_FORMAT_XRGB8888);
+        wl_buffer_add_listener(st->slots[i].buffer, &buffer_listener, &st->slots[i]);
+        st->slots[i].busy = 0;
+    }
+    st->buf_w = w;
+    st->buf_h = h;
+}
 
-    /* Wrap the memory in protocol objects: pool = the whole file,
-     * buffer = one image inside it. Then the fd can be closed;
-     * the compositor holds its own reference. */
-    struct wl_shm_pool* pool = wl_shm_create_pool(st->shm, fd, size);
-    struct wl_buffer* buffer =
-        wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_XRGB8888);
-    wl_shm_pool_destroy(pool);
-    close(fd);
+/* The actual "rendering": a diagonal gradient scrolling with time.
+ * t is the compositor's frame timestamp in ms -- using it (instead of
+ * our own clock) keeps the motion in step with the display even when
+ * frames are skipped. */
+static void fill_gradient(uint32_t* px, int w, int h, uint32_t t) {
+    const uint32_t shift = t / 8;
+    for (int y = 0; y < h; y++) {
+        const uint32_t g = (uint32_t)y * 255 / (uint32_t)h;
+        for (int x = 0; x < w; x++) {
+            const uint32_t r = (((uint32_t)x * 255 / (uint32_t)w) + shift) & 255;
+            const uint32_t b = 255 - r;
+            px[(size_t)y * (size_t)w + (size_t)x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
 
-    wl_buffer_add_listener(buffer, &buffer_listener, NULL);
-    return buffer;
+/* Draw one frame into a free slot and stage it on the surface (the
+ * caller commits). If every slot is still on loan, skip this frame --
+ * the next frame callback tries again. (This is exactly the situation
+ * where SLOTS = 3 would help.) */
+static void render(struct state* st) {
+    struct slot* s = NULL;
+    for (int i = 0; i < SLOTS; i++) {
+        if (!st->slots[i].busy) {
+            s = &st->slots[i];
+            break;
+        }
+    }
+    if (!s) { return; }
+
+    uint32_t* px = st->pool_data + (size_t)(s - st->slots) * (size_t)st->buf_w * (size_t)st->buf_h;
+    fill_gradient(px, st->buf_w, st->buf_h, st->last_time);
+
+    wl_surface_attach(st->surface, s->buffer, 0, 0);
+    /* attach alone does not tell the compositor what changed */
+    wl_surface_damage_buffer(st->surface, 0, 0, INT32_MAX, INT32_MAX);
+    s->busy = 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* The render loop: never draw on a timer. We ask the compositor for  */
+/* a frame callback; it fires when drawing a new frame is worthwhile  */
+/* (window visible, display about to refresh). Occluded window -> no  */
+/* callbacks -> no wasted CPU. Each callback draws one frame and      */
+/* requests the next one: request BEFORE commit, so the request is    */
+/* part of the committed state.                                       */
+/* ------------------------------------------------------------------ */
+
+static void on_frame_done(void* data, struct wl_callback* cb, uint32_t time_ms);
+
+static const struct wl_callback_listener frame_listener = {
+    .done = on_frame_done,
+};
+
+static void schedule_frame(struct state* st) {
+    struct wl_callback* cb = wl_surface_frame(st->surface);
+    wl_callback_add_listener(cb, &frame_listener, st);
+}
+
+static void on_frame_done(void* data, struct wl_callback* cb, uint32_t time_ms) {
+    struct state* st = data;
+    wl_callback_destroy(cb); /* frame callbacks are one-shot */
+    st->last_time = time_ms;
+
+    schedule_frame(st);
+    render(st);
+    wl_surface_commit(st->surface);
 }
 
 /* ------------------------------------------------------------------ */
 /* Step 2 (the handshake): the compositor answers our first commit    */
 /* with a configure event. We must ack it, quoting its serial. Only   */
 /* then may the surface carry content -- so this callback is also     */
-/* where we attach the buffer. The commit at the end is the mapping   */
-/* moment: this is when the window appears on screen.                 */
+/* where the first frame is drawn and the render loop is started.     */
+/* The commit at the end is the mapping moment: this is when the      */
+/* window appears on screen.                                          */
 /*                                                                    */
 /* The same callback serves every later resize: toplevel configure    */
 /* staged pending_w/h, our ack promises "commits from now on answer   */
@@ -166,8 +286,12 @@ static void on_xdg_surface_configure(void* data, struct xdg_surface* xdg_surface
 
     xdg_surface_ack_configure(xdg_surface, serial);
 
-    struct wl_buffer* buffer = draw_frame(st);
-    wl_surface_attach(st->surface, buffer, 0, 0);
+    ensure_buffers(st);
+    if (!st->animating) {
+        st->animating = 1;
+        schedule_frame(st);
+    }
+    render(st);
     wl_surface_commit(st->surface);
 }
 
@@ -224,7 +348,7 @@ int main(void) {
 
     /* Introduction phase: listen to the menu, bind services.
      * One roundtrip is enough here -- none of our three globals
-     * sends initial events on bind (unlike dmabuf in zcc). */
+     * sends initial events on bind. */
     st.registry = wl_display_get_registry(st.display);
     wl_registry_add_listener(st.registry, &registry_listener, &st);
     wl_display_roundtrip(st.display);
@@ -235,7 +359,7 @@ int main(void) {
     }
     xdg_wm_base_add_listener(st.wm_base, &wm_base_listener, &st);
 
-    /* Step 0.5: the blank canvas -- what you created in lldb. */
+    /* Step 0.5: the blank canvas. */
     st.surface = wl_compositor_create_surface(st.compositor);
 
     /* Step 1: give it a role. Surface -> xdg_surface -> toplevel. */
@@ -256,7 +380,14 @@ int main(void) {
      * Everything from here on happens inside the listeners. */
     while (st.running && wl_display_dispatch(st.display) != -1) {}
 
-    /* Teardown mirror, same discipline as WaylandCore::disconnect. */
+    /* Teardown mirror: buffers before pool, pool before the globals. */
+    for (int i = 0; i < SLOTS; i++) {
+        if (st.slots[i].buffer) { wl_buffer_destroy(st.slots[i].buffer); }
+    }
+    if (st.pool) {
+        wl_shm_pool_destroy(st.pool);
+        munmap(st.pool_data, st.pool_bytes);
+    }
     xdg_toplevel_destroy(st.toplevel);
     xdg_surface_destroy(st.xdg_surface);
     wl_surface_destroy(st.surface);
