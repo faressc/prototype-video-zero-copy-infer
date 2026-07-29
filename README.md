@@ -1,6 +1,6 @@
 # hello_wayland — notes
 
-The smallest honest Wayland window ([main.c](main.c)) — now with a continuously animated gradient — plus everything learned while dissecting it.
+The smallest honest Wayland window — animated, interactive, rendered three ways — plus everything learned while dissecting it. Layout: [common.c](common.c)/[common.h](common.h) hold the shared protocol layer (registry, xdg handshake, seat input, cursor, animation clock, frame loop); each backend is one file hooking in via a two-function vtable (`configure` + `redraw`, embedding `struct app` as first member): [shm.c](shm.c), [egl.c](egl.c), [vulkan.c](vulkan.c).
 The core is still one four-beat pipeline: **role → configure/ack → buffer → commit**, with a frame-callback render loop (§6) on top.
 
 ## 1. Where the xdg-shell symbols live
@@ -76,7 +76,7 @@ compositor                              client
 - **The first configure is gated:** attaching a buffer before acking it is a protocol error — the compositor gets to state constraints ("start maximized") before the window ever shows.
 - **Buffer lifetime:** a committed buffer may not be freed (or drawn into!) until `wl_buffer.release` says the compositor stopped reading — it maps the same memory. Details in §6.
 
-Implementation in [main.c](main.c): `on_toplevel_configure` **stages** `pending_w/h` into the state struct (nothing applied); `on_xdg_surface_configure` acks, recreates the buffers if the size changed, then draws at the staged size — the single point where the batch is consumed.
+Implementation in [common.c](common.c): `on_toplevel_configure` **stages** `pending_w/h` (nothing applied); `on_xdg_surface_configure` acks, applies the size, and calls the backend's `configure` hook (resize resources) + `redraw` — the single point where the batch is consumed.
 
 ## 6. Continuous rendering: frame callbacks & double buffering
 
@@ -92,11 +92,11 @@ Implementation in [main.c](main.c): `on_toplevel_configure` **stages** `pending_
 One **seat** = one user: a bundle of pointer + keyboard (+ touch) capabilities. Bind it (finally using the version argument: `min(server_version, 5)` — v5 gives pointer frame batching), listen for `capabilities`, and call `get_pointer` / `get_keyboard` for the bits present. Capabilities are **dynamic** — unplug the mouse and the event fires again without that bit, so handle both get and release.
 
 - **Keyboard scancodes are raw** — interpreting them takes the compositor-distributed keymap plus xkbcommon; full walkthrough in §9.
-- **Pointer events are batched** (since v5): enter/motion/axis of one hardware event arrive together, terminated by `wl_pointer.frame` — the stage/apply transaction pattern a third time, now compositor → client. Implemented properly in [main.c](main.c): the event handlers only *stage* into a `struct pointer_event` (axis values summed), and `on_pointer_frame` *applies* the batch atomically and clears it — that's what keeps a diagonal touchpad scroll one gesture instead of an L-shaped pair. Coordinates are surface-local `wl_fixed_t` (24.8 fixed point). Exception: `set_cursor` stays in the enter handler — it's a protocol *reply* to the enter (like pong answers ping), not application state.
+- **Pointer events are batched** (since v5): enter/motion/axis of one hardware event arrive together, terminated by `wl_pointer.frame` — the stage/apply transaction pattern a third time, now compositor → client. Implemented properly in [common.c](common.c): the event handlers only *stage* into a `struct app_pointer_event` (axis values summed), and `on_pointer_frame` *applies* the batch atomically and clears it — that's what keeps a diagonal touchpad scroll one gesture instead of an L-shaped pair. Coordinates are surface-local `wl_fixed_t` (24.8 fixed point). Exception: `set_cursor` stays in the enter handler — it's a protocol *reply* to the enter (like pong answers ping), not application state.
 - **The cursor inside your window is your responsibility** — no server-side default; see §8.
 - **Input serials authorize privileged requests.** `xdg_toplevel_move(seat, serial)` quotes the button-press serial — proof of fresh user intent; the compositor rejects stale serials, so apps can't fling windows around spontaneously. (Same pattern authorizes clipboard access and popup grabs.)
 
-In [main.c](main.c): pointer position steers the gradient origin, left-drag hands the window move to the compositor, scroll scales the animation clock (through zero into reverse), Space pauses, Esc/Q quits.
+In [common.c](common.c) — so all three backends inherit it: pointer position steers the gradient origin, left-drag hands the window move to the compositor, scroll scales the animation clock (through zero into reverse), Space pauses, Esc/Q quits.
 
 ## 8. The cursor: just another surface
 
@@ -144,11 +144,22 @@ Requests are mail written but not posted. `wl_proxy_marshal_flags` only appends 
 
 In this program: *nothing* is sent until the roundtrip (write #1: `get_registry` + `sync` together); the entire surface/role/title/commit batch sits buffered until the first `dispatch` (write #2). Rationale: syscall batching. Footgun: `wl_display_disconnect` does **not** flush.
 
-## 11. Marshalling
+## 11. The event pump: dispatch & queues
+
+`wl_display_dispatch` is Wayland's *message pump* (Win32 `GetMessage`/`DispatchMessage`, GLib main-loop iteration). One call = one full cycle: **flush** outgoing requests (never wait for replies to unsent questions) → **read** the socket (blocking if empty) → **demultiplex** each `[id, opcode, args]` via proxy lookup + signature tables → **deliver** to listeners with their `user_data`. Returns events dispatched, −1 on error/disconnect — hence `while (running && dispatch != -1)`.
+
+- **Routing happens at two levels:** object ID → proxy (the claim-ticket table), then opcode → function: a listener struct is memory-layout-identical to an array of function pointers indexed by opcode — `libwayland` literally jumps through `listener[opcode]`. That's why every slot must be filled for the bound version: a missing member isn't "unhandled," it's a null-pointer jump.
+- **The pump has two separable strokes.** `wl_display_dispatch` = read + drain; `wl_display_dispatch_pending` = drain the queue *only*, never touching the socket. Our two loop styles map onto exactly this pair: `app_run` blocks in the full pump; vulkan.c's game loop uses `dispatch_pending` and lets Mesa's present call read the socket.
+- **One connection, N queues, one pump per queue.** Every proxy is assigned to an event queue (default: the default queue); a dispatch call drains one queue. Libraries move *their* proxies to private queues and pump them themselves — in the EGL/Vulkan debug logs every line is tagged `{Default Queue}` or `{mesa egl surface queue}`: same socket, two pumps, each delivering only to its own listeners. That's the idiomatic Wayland answer to threading: don't lock shared listener state, give each thread its own queue (`wl_display_create_queue` + `wl_proxy_set_queue` + `wl_display_dispatch_queue`).
+- **The shm build is the minimal case: one queue contains everything** (input, configure, releases, frame callbacks — no Mesa, no second party). Consequences: *strict serialization in arrival order* — one callback at a time, which is why `busy` and the pointer staging need no atomics; and *head-of-line blocking* — `fill_gradient` runs inside the pump, so pointer events queue up (delayed, not lost) while pixels are being filled: input latency is welded to render time, the classic single-threaded UI loop trade-off. The moment you'd move rendering to its own thread, you'd give buffers + frame callbacks their own queue and each thread keeps single-lane guarantees.
+
+The layered picture: **one socket** (kernel guarantees byte order) → **N queues** (one per independent party/thread) → **one pump per queue** → **listeners** (ID, then opcode).
+
+## 12. Marshalling
 
 Converting a typed C call into bytes for the socket (unmarshalling = reverse). Wire format, all 32-bit words: `[object id][size<<16 | opcode][args…]`. Opcode = position of the request in the XML (`xdg_toplevel.set_title` = 2). Strings: length incl. NUL, then bytes, padded to 4. The variadic marshaller can't see C types — it follows the **signature string** from the generated tables (`"s"` = string, `"no"` = new id + object, `"u"` = uint). File descriptors are *not* in the byte stream: they ride as `SCM_RIGHTS` ancillary data and the kernel translates them into the receiver's fd table — why wl_shm needs a Unix socket.
 
-## 12. Looking things up
+## 13. Looking things up
 
 | Question | Tool |
 | --- | --- |
@@ -158,6 +169,24 @@ Converting a typed C call into bytes for the socket (unmarshalling = reverse). W
 
 Ops are **never transmitted**: the wire is bare `[id, opcode, args]` with no self-description (contrast D-Bus). Both sides compile in the same tables; the version number is the only negotiation. `wl_registry_bind(…, version)` picks the version *you* speak — this app binds `xdg_wm_base` v1 though Hyprland offers v7, so it never receives ≥v2 events. Binding `min(server_version, version_you_support)` is how you opt into more.
 
-## 13. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+## 14. GPU rendering: the same window three ways
 
-`pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into the build dir; both compile into the executable alongside `main.c`. Input added two ordinary libraries: `xkbcommon` (keymap compilation, scancode → keysym) and `wayland-cursor` (XCursor theme loading → wl_buffers).
+Three executables, same gradient, same protocol skeleton — the diffs are the lesson:
+
+| | `hello_wayland` ([shm.c](shm.c)) | `hello_wayland_egl` ([egl.c](egl.c)) | `hello_wayland_vulkan` ([vulkan.c](vulkan.c)) |
+| --- | --- | --- | --- |
+| pixels come from | CPU loop into shm | fragment shader via GLES2 | fragment shader via Vulkan |
+| buffers | our memfd pool + slots | **our gbm_bo dmabufs + slots** (hand-rolled swapchain) | driver swapchain, **explicit** |
+| shader compile | — | **runtime** (GLSL source strings) | **build time** (glslc → SPIR-V) |
+| pacing | frame callbacks | frame callbacks (no swap call exists) | blocking FIFO present (game style) |
+| release tracking | our `busy` flags | our `busy` flags — **back!** | semaphores/fences **you** wire |
+
+**GLES + hand-rolled dmabuf swapchain** ([egl.c](egl.c)): EGL's two halves, separated. GLES structurally cannot create its own context (no `gl*` call runs without one current, and every `gl*` call lacks a context parameter — chicken-and-egg by design, 1992), so EGL survives as a three-call **context factory**: GBM-platform display over our own render-node fd (`/dev/dri/renderD128` — render nodes are the unprivileged GPU door; modesetting stays with the compositor on card0), surfaceless context (`EGL_KHR_surfaceless_context`), MakeCurrent with `EGL_NO_SURFACE`. The **window-system half is gone**: no `wl_egl_window`, no `EGLSurface`, no `eglSwapBuffers`. Instead, per slot: `gbm_bo_create` (LINEAR — real apps negotiate tiled modifiers via dmabuf feedback) → `gbm_bo_get_fd` (GPU memory wearing an fd) → `eglCreateImage` + renderbuffer + FBO (GL renders *into* the dmabuf) → `zwp_linux_dmabuf_v1.create_params`/`add(fd,…)`/`create_immed` → `wl_buffer` — the protocol Mesa used to speak behind our back, now ours, **bound on a private event queue** (the Mesa pattern: roundtrip without dispatching the default queue, so configure can't fire before the context exists). The busy/release/orphan machinery is shm.c verbatim, with GPU memory. Sync: `glFlush` + implicit dmabuf fencing (kernel attaches the render fence; compositor waits); `glFinish` is the sledgehammer, `linux-drm-syncobj-v1` the modern explicit way. Verified live: **zero** `{mesa egl surface queue}` lines — Mesa is no longer a tenant on the socket; 226 dmabuf messages, all ours. Bonus fossil: FBO rendering *cancels* the famous GL y-flip (GL's y=0 row = start of buffer = scanout's top row), so the vertex shader drops the `1.0 − uv.y` that the window-surface version needed. The GLES war stories still apply: shared uniforms must match precision across stages (link error), and **`mediump` is real fp16 on AGX** (max 65504) while desktop drivers treat it as decorative fp32 — pixel-coordinate math overflowed to inf → NaN → banded garbage; fix `precision highp float;` (optional in GLES2 fragment shaders — portable code checks `GL_FRAGMENT_PRECISION_HIGH`).
+
+**Vulkan** (the explicit way): every shm.c concept returns wearing an API name — `minImageCount`/present mode = `SLOTS` and double-vs-triple; `vkAcquireNextImageKHR` = the free-slot scan; the `imageAvailable` semaphore = `busy → 0`; `vkQueuePresentKHR` = attach+damage+commit; swapchain recreation with `oldSwapchain` = fresh-pool-per-resize with orphan draining. Even `currentExtent == 0xFFFFFFFF` is the Vulkan spelling of configure's "0 = you pick". Shaders are compiled at **build time** ([shaders/](shaders/) → SPIR-V via glslc — the wayland-scanner pattern: spec compiled to artifact, runtime merely loads); the driver only does SPIR-V → GPU-ISA at pipeline creation (the step games hide behind loading screens; Mesa caches it in `~/.cache/mesa_shader_cache`). Uses Vulkan 1.3 dynamic rendering (no render-pass/framebuffer objects; we do image layout transitions with barriers instead), 2 frames in flight, dynamic viewport so resize only rebuilds the swapchain, never the pipeline.
+
+Building the Vulkan demo needs a GLSL→SPIR-V compiler: `sudo dnf install glslc` (or `glslang`); CMake picks it up and enables the target.
+
+## 15. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+
+`pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into a static `xdg_shell_protocol` library shared by everything. `app_common` (from `common.c`) layers the client boilerplate on top, pulling in `xkbcommon` (keymap compilation, scancode → keysym) and `wayland-cursor` (XCursor theme → wl_buffers); each backend executable is one source file linked against `app_common` plus its GPU stack (`egl glesv2 gbm libdrm` + a second generated protocol binding for linux-dmabuf, or `vulkan` + the glslc shader step).
