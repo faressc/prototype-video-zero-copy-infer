@@ -299,22 +299,29 @@ static void egl_configure(struct app* a) {
         } /* busy -> orphan; on_buffer_release destroys it (implicit mode) */
 
         /* 1. allocate GPU memory (what Mesa's swapchain did).
-         *    LINEAR: universally shareable layout; a real app
-         *    negotiates tiled modifiers via dmabuf feedback. */
+         *    We ask only for RENDERING and let the driver pick the
+         *    layout: forcing LINEAR here is not portable (NVIDIA's GBM
+         *    rejects RENDERING|LINEAR outright). Whatever tiling comes
+         *    back, we carry its modifier to EGL and to the compositor
+         *    below -- a real app would first check that modifier
+         *    against dmabuf feedback. */
         s->bo = gbm_bo_create(e->gbm,
                               (uint32_t)w,
                               (uint32_t)h,
                               DRM_FORMAT_XRGB8888,
-                              GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+                              GBM_BO_USE_RENDERING);
         if (!s->bo) {
             fprintf(stderr, "gbm_bo_create failed\n");
             exit(1);
         }
         int fd = gbm_bo_get_fd(s->bo); /* GPU memory, wearing an fd */
         uint32_t stride = gbm_bo_get_stride(s->bo);
+        /* INVALID = "driver-private, ask the kernel" (implicit modifier);
+         * both EGL and the protocol have a spelling for that case. */
+        uint64_t modifier = gbm_bo_get_modifier(s->bo);
 
         /* 2. let GL render INTO it: dmabuf -> EGLImage -> rbo -> FBO */
-        const EGLAttrib attrs[] = {
+        EGLAttrib attrs[] = {
             EGL_WIDTH,
             w,
             EGL_HEIGHT,
@@ -327,12 +334,18 @@ static void egl_configure(struct app* a) {
             0,
             EGL_DMA_BUF_PLANE0_PITCH_EXT,
             (EGLAttrib)stride,
-            EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
-            (EGLAttrib)(DRM_FORMAT_MOD_LINEAR & 0xffffffff),
-            EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
-            (EGLAttrib)(DRM_FORMAT_MOD_LINEAR >> 32),
+            EGL_NONE, /* the modifier pair, or the real terminator */
+            EGL_NONE,
+            EGL_NONE,
+            EGL_NONE,
             EGL_NONE,
         };
+        if (modifier != DRM_FORMAT_MOD_INVALID) {
+            attrs[12] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+            attrs[13] = (EGLAttrib)(modifier & 0xffffffff);
+            attrs[14] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+            attrs[15] = (EGLAttrib)(modifier >> 32);
+        }
         s->image =
             eglCreateImage(e->egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attrs);
         if (s->image == EGL_NO_IMAGE) {
@@ -358,8 +371,8 @@ static void egl_configure(struct app* a) {
                                        0,
                                        0,
                                        stride,
-                                       (uint32_t)(DRM_FORMAT_MOD_LINEAR >> 32),
-                                       (uint32_t)(DRM_FORMAT_MOD_LINEAR & 0xffffffff));
+                                       (uint32_t)(modifier >> 32),
+                                       (uint32_t)(modifier & 0xffffffff));
         s->buffer = zwp_linux_buffer_params_v1_create_immed(params, w, h, DRM_FORMAT_XRGB8888, 0);
         zwp_linux_buffer_params_v1_destroy(params);
         if (e->surface_sync) {
