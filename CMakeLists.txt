@@ -87,9 +87,32 @@ add_library(dmabuf_protocol STATIC
 target_include_directories(dmabuf_protocol PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(dmabuf_protocol PUBLIC PkgConfig::WAYLAND_CLIENT)
 
+# linux-drm-syncobj-v1: explicit sync (same generation pattern). Used by
+# gles-dmabuf.c when the compositor offers it; implicit-sync fallback kept.
+set(SYNCOBJ_XML ${WAYLAND_PROTOCOLS_DIR}/staging/linux-drm-syncobj/linux-drm-syncobj-v1.xml)
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/linux-drm-syncobj-v1-client-protocol.h
+    COMMAND ${WAYLAND_SCANNER} client-header ${SYNCOBJ_XML}
+            ${CMAKE_CURRENT_BINARY_DIR}/linux-drm-syncobj-v1-client-protocol.h
+    DEPENDS ${SYNCOBJ_XML})
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/linux-drm-syncobj-v1-protocol.c
+    COMMAND ${WAYLAND_SCANNER} private-code ${SYNCOBJ_XML}
+            ${CMAKE_CURRENT_BINARY_DIR}/linux-drm-syncobj-v1-protocol.c
+    DEPENDS ${SYNCOBJ_XML})
+
+add_library(syncobj_protocol STATIC
+    ${CMAKE_CURRENT_BINARY_DIR}/linux-drm-syncobj-v1-protocol.c
+    ${CMAKE_CURRENT_BINARY_DIR}/linux-drm-syncobj-v1-client-protocol.h)
+target_include_directories(syncobj_protocol PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(syncobj_protocol PUBLIC PkgConfig::WAYLAND_CLIENT)
+
 pkg_check_modules(GLES_DMABUF_STACK REQUIRED IMPORTED_TARGET egl glesv2 gbm libdrm)
 add_executable(hello_wayland_gles_dmabuf gles-dmabuf.c)
 target_link_libraries(hello_wayland_gles_dmabuf PRIVATE app_common dmabuf_protocol
+                                                        syncobj_protocol
                                                         PkgConfig::GLES_DMABUF_STACK)
 
 # ---------------------------------------------------------------------------

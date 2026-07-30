@@ -21,6 +21,9 @@
  *                eglCreateImage + FBO    make GL render INTO it
  *                zwp_linux_dmabuf_v1     wrap the fd in a wl_buffer
  *                slots + busy + release  the swapchain (shm.c pattern!)
+ *                linux-drm-syncobj-v1    explicit fences, when the
+ *                                        compositor offers it (implicit
+ *                                        sync stays as the fallback)
  *
  * Consequences you can verify with WAYLAND_DEBUG=1: no more
  * "{mesa egl surface queue}" lines -- Mesa is no longer a tenant on
@@ -31,9 +34,11 @@
  */
 
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <EGL/egl.h>
@@ -42,9 +47,11 @@
 #include <GLES2/gl2ext.h> /* glEGLImageTargetRenderbufferStorageOES */
 #include <drm_fourcc.h>   /* DRM_FORMAT_XRGB8888, DRM_FORMAT_MOD_LINEAR */
 #include <gbm.h>
+#include <xf86drm.h> /* drmSyncobj*: the kernel fence-container objects */
 
 #include "common.h"
-#include "linux-dmabuf-v1-client-protocol.h" /* generated, bound by US now */
+#include "linux-dmabuf-v1-client-protocol.h"      /* generated, bound by US now */
+#include "linux-drm-syncobj-v1-client-protocol.h" /* explicit sync, ditto */
 
 /* Back to explicit double buffering: WE are the swapchain again. */
 enum { SLOTS = 2 };
@@ -55,6 +62,17 @@ struct egl_slot {
     GLuint rbo, fbo;          /* GL render target plumbing */
     struct wl_buffer* buffer; /* its handle inside the compositor */
     int busy;                 /* committed, not yet released (shm.c verbatim) */
+
+    /* explicit sync (when active): one timeline per direction, the
+     * same point value N on both for this slot's Nth frame.
+     * acquire  = "GPU finished rendering" -- signaled by our GL fence;
+     * release  = "compositor finished reading" -- signaled by IT.
+     * wl_buffer.release is UNDEFINED in this mode; the release point
+     * replaces it. */
+    uint32_t acquire_syncobj, release_syncobj; /* kernel handles */
+    struct wp_linux_drm_syncobj_timeline_v1* acquire_timeline;
+    struct wp_linux_drm_syncobj_timeline_v1* release_timeline;
+    uint64_t point; /* last committed timeline point (0 = never) */
 };
 
 struct egl_app {
@@ -64,6 +82,15 @@ struct egl_app {
     int drm_fd;
     struct gbm_device* gbm;
     struct zwp_linux_dmabuf_v1* dmabuf;
+
+    /* explicit sync -- all-or-nothing: surface_sync != NULL means the
+     * compositor offers the global AND EGL can export render fences
+     * as fds; otherwise we stay on implicit sync (NULL checks below) */
+    struct wp_linux_drm_syncobj_manager_v1* syncobj_manager;
+    struct wp_linux_drm_syncobj_surface_v1* surface_sync;
+    PFNEGLCREATESYNCKHRPROC create_sync;
+    PFNEGLDESTROYSYNCKHRPROC destroy_sync;
+    PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence_fd;
 
     /* the surviving rump of EGL: pure context factory */
     EGLDisplay egl_display;
@@ -187,6 +214,61 @@ static void destroy_slot_gl(struct egl_app* e, struct egl_slot* s) {
     s->bo = NULL;
 }
 
+/* ------------------------------------------------------------------ */
+/* Explicit sync (linux-drm-syncobj-v1). Implicit sync rides the BO   */
+/* invisibly inside the kernel; here the fences travel in the open:   */
+/* per commit we set an ACQUIRE timeline point ("read only after the  */
+/* GPU signals this") carrying our GL render fence, and a RELEASE     */
+/* point the compositor signals when it stops reading. Drivers        */
+/* without implicit sync (NVIDIA) need exactly this.                  */
+/* ------------------------------------------------------------------ */
+
+/* A DRM syncobj is a kernel container for fences; a TIMELINE syncobj
+ * holds a whole sequence, indexed by uint64 points. We give each slot
+ * two and reuse them forever -- point N = the slot's Nth frame. */
+static struct wp_linux_drm_syncobj_timeline_v1* create_timeline(struct egl_app* e,
+                                                                uint32_t* handle) {
+    int fd = -1;
+    if (drmSyncobjCreate(e->drm_fd, 0, handle) < 0 ||
+        drmSyncobjHandleToFD(e->drm_fd, *handle, &fd) < 0) {
+        perror("drmSyncobjCreate");
+        exit(1);
+    }
+    /* the fd trick a fourth time: the compositor imports the SAME
+     * kernel object and watches/signals the points we name */
+    struct wp_linux_drm_syncobj_timeline_v1* timeline =
+        wp_linux_drm_syncobj_manager_v1_import_timeline(e->syncobj_manager, fd);
+    close(fd);
+    return timeline;
+}
+
+static void destroy_slot_sync(struct egl_app* e, struct egl_slot* s) {
+    if (s->acquire_timeline) { wp_linux_drm_syncobj_timeline_v1_destroy(s->acquire_timeline); }
+    if (s->release_timeline) { wp_linux_drm_syncobj_timeline_v1_destroy(s->release_timeline); }
+    if (s->acquire_syncobj) { drmSyncobjDestroy(e->drm_fd, s->acquire_syncobj); }
+    if (s->release_syncobj) { drmSyncobjDestroy(e->drm_fd, s->release_syncobj); }
+    s->acquire_timeline = NULL;
+    s->release_timeline = NULL;
+    s->acquire_syncobj = 0;
+    s->release_syncobj = 0;
+    s->point = 0;
+}
+
+/* The free-slot test. Implicit mode: wl_buffer.release cleared busy.
+ * Explicit mode: that event is undefined, so ask the kernel instead --
+ * drmSyncobjQuery returns the timeline's last signaled point; once it
+ * reaches the slot's committed point, the compositor is done reading. */
+static int slot_is_free(struct egl_app* e, struct egl_slot* s) {
+    if (s->busy && e->surface_sync) {
+        uint64_t value = 0;
+        if (drmSyncobjQuery(e->drm_fd, &s->release_syncobj, &value, 1) == 0 &&
+            value >= s->point) {
+            s->busy = 0;
+        }
+    }
+    return !s->busy;
+}
+
 static void egl_configure(struct app* a) {
     struct egl_app* e = (struct egl_app*)a;
     const int w = a->width;
@@ -196,9 +278,25 @@ static void egl_configure(struct app* a) {
     for (int i = 0; i < SLOTS; i++) {
         struct egl_slot* s = &e->slots[i];
         destroy_slot_gl(e, s);
+        if (e->surface_sync && s->busy && s->point) {
+            /* explicit mode has no release events, so no orphan
+             * machinery either: wait (bounded) for the compositor's
+             * release point, then tear down in place */
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            drmSyncobjTimelineWait(e->drm_fd,
+                                   &s->release_syncobj,
+                                   &s->point,
+                                   1,
+                                   (int64_t)now.tv_sec * 1000000000 + now.tv_nsec + 100000000,
+                                   DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT,
+                                   NULL);
+            s->busy = 0;
+        }
+        destroy_slot_sync(e, s);
         if (s->buffer && !s->busy) {
             wl_buffer_destroy(s->buffer);
-        } /* busy -> orphan; on_buffer_release destroys it */
+        } /* busy -> orphan; on_buffer_release destroys it (implicit mode) */
 
         /* 1. allocate GPU memory (what Mesa's swapchain did).
          *    LINEAR: universally shareable layout; a real app
@@ -264,7 +362,15 @@ static void egl_configure(struct app* a) {
                                        (uint32_t)(DRM_FORMAT_MOD_LINEAR & 0xffffffff));
         s->buffer = zwp_linux_buffer_params_v1_create_immed(params, w, h, DRM_FORMAT_XRGB8888, 0);
         zwp_linux_buffer_params_v1_destroy(params);
-        wl_buffer_add_listener(s->buffer, &buffer_listener, s);
+        if (e->surface_sync) {
+            /* release events are undefined in explicit mode -- a stray
+             * one clearing busy EARLY would hand out a buffer the
+             * compositor still reads, so no listener at all here */
+            s->acquire_timeline = create_timeline(e, &s->acquire_syncobj);
+            s->release_timeline = create_timeline(e, &s->release_syncobj);
+        } else {
+            wl_buffer_add_listener(s->buffer, &buffer_listener, s);
+        }
         s->busy = 0;
 
         close(fd); /* image + compositor import keep the memory alive */
@@ -280,7 +386,7 @@ static void egl_redraw(struct app* a) {
 
     struct egl_slot* s = NULL;
     for (int i = 0; i < SLOTS; i++) {
-        if (!e->slots[i].busy) {
+        if (slot_is_free(e, &e->slots[i])) {
             s = &e->slots[i];
             break;
         }
@@ -299,11 +405,52 @@ static void egl_redraw(struct app* a) {
     glVertexAttribPointer((GLuint)e->a_pos, 2, GL_FLOAT, GL_FALSE, 0, verts);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    /* Submit, don't wait: the kernel attaches the render job's fence
-     * to the dmabuf (implicit sync) and the compositor waits on it
-     * before reading. glFinish would be the CPU-stalling sledgehammer;
-     * linux-drm-syncobj-v1 is the modern explicit alternative. */
-    glFlush();
+    if (e->surface_sync) {
+        /* Explicit sync: hand over the render fence in the open.
+         * GL fence -> sync_file fd -> acquire point N; the compositor
+         * signals release point N when it stops reading. Once the
+         * surface has a sync object, EVERY buffer commit must carry
+         * both points (protocol error otherwise). */
+        s->point++;
+        EGLSyncKHR sync = e->create_sync(e->egl_display, EGL_SYNC_NATIVE_FENCE_ANDROID, NULL);
+        glFlush(); /* submits the job AND materializes the fence fd */
+        EGLint fence_fd = sync != EGL_NO_SYNC_KHR ? e->dup_fence_fd(e->egl_display, sync)
+                                                  : EGL_NO_NATIVE_FENCE_FD_ANDROID;
+        if (sync != EGL_NO_SYNC_KHR) { e->destroy_sync(e->egl_display, sync); }
+
+        if (fence_fd >= 0) {
+            /* sync_file is a BINARY fence; route it onto the timeline:
+             * import into a scratch syncobj, transfer to point N */
+            uint32_t tmp = 0;
+            if (drmSyncobjCreate(e->drm_fd, 0, &tmp) < 0 ||
+                drmSyncobjImportSyncFile(e->drm_fd, tmp, fence_fd) < 0 ||
+                drmSyncobjTransfer(e->drm_fd, s->acquire_syncobj, s->point, tmp, 0, 0) < 0) {
+                fprintf(stderr, "syncobj import failed\n");
+                exit(1);
+            }
+            drmSyncobjDestroy(e->drm_fd, tmp);
+            close(fence_fd);
+        } else {
+            /* no exportable fence this frame: CPU-wait, then signal
+             * the acquire point ourselves -- correct, not pipelined */
+            glFinish();
+            drmSyncobjTimelineSignal(e->drm_fd, &s->acquire_syncobj, &s->point, 1);
+        }
+        wp_linux_drm_syncobj_surface_v1_set_acquire_point(e->surface_sync,
+                                                          s->acquire_timeline,
+                                                          (uint32_t)(s->point >> 32),
+                                                          (uint32_t)(s->point & 0xffffffff));
+        wp_linux_drm_syncobj_surface_v1_set_release_point(e->surface_sync,
+                                                          s->release_timeline,
+                                                          (uint32_t)(s->point >> 32),
+                                                          (uint32_t)(s->point & 0xffffffff));
+    } else {
+        /* Implicit sync: submit, don't wait -- the kernel attaches the
+         * render job's fence to the dmabuf and the compositor waits on
+         * it before reading. glFinish would be the CPU-stalling
+         * sledgehammer. */
+        glFlush();
+    }
 
     wl_surface_attach(a->surface, s->buffer, 0, 0);
     wl_surface_damage_buffer(a->surface, 0, 0, INT32_MAX, INT32_MAX);
@@ -333,6 +480,9 @@ static void on_dmabuf_global(void* data,
                                      name,
                                      &zwp_linux_dmabuf_v1_interface,
                                      version < 3 ? version : 3);
+    } else if (strcmp(interface, wp_linux_drm_syncobj_manager_v1_interface.name) == 0) {
+        e->syncobj_manager =
+            wl_registry_bind(registry, name, &wp_linux_drm_syncobj_manager_v1_interface, 1);
     }
 }
 
@@ -365,9 +515,11 @@ static void bind_dmabuf(struct egl_app* e) {
         fprintf(stderr, "compositor lacks zwp_linux_dmabuf_v1\n");
         exit(1);
     }
-    /* move the bound proxy to the default queue: from now on its
-     * descendants (params, wl_buffers) dispatch in the main pump */
+    /* move the bound proxies to the default queue: from now on their
+     * descendants (params, wl_buffers, timelines) dispatch in the
+     * main pump. syncobj_manager may be NULL -- it's optional. */
     wl_proxy_set_queue((struct wl_proxy*)e->dmabuf, NULL);
+    if (e->syncobj_manager) { wl_proxy_set_queue((struct wl_proxy*)e->syncobj_manager, NULL); }
     wl_event_queue_destroy(queue);
 }
 
@@ -441,6 +593,25 @@ int main(void) {
         return 1;
     }
 
+    /* Explicit sync, if every piece exists: the compositor global AND
+     * EGL able to export render fences as sync_file fds. Creating the
+     * surface_sync object is the commitment -- from then on every
+     * buffer commit MUST carry acquire+release points, so it stays
+     * NULL unless the whole chain is in place (implicit fallback). */
+    if (e.syncobj_manager && strstr(exts, "EGL_ANDROID_native_fence_sync")) {
+        e.create_sync = (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR");
+        e.destroy_sync = (PFNEGLDESTROYSYNCKHRPROC)eglGetProcAddress("eglDestroySyncKHR");
+        e.dup_fence_fd =
+            (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)eglGetProcAddress("eglDupNativeFenceFDANDROID");
+        if (e.create_sync && e.destroy_sync && e.dup_fence_fd) {
+            e.surface_sync =
+                wp_linux_drm_syncobj_manager_v1_get_surface(e.syncobj_manager, e.app.surface);
+        }
+    }
+    if (!e.surface_sync) {
+        fprintf(stderr, "explicit sync unavailable -- falling back to implicit sync\n");
+    }
+
     /* context is current with no surface needed -> shaders compile now,
      * before any configure can fire */
     init_gl(&e);
@@ -449,8 +620,11 @@ int main(void) {
 
     for (int i = 0; i < SLOTS; i++) {
         destroy_slot_gl(&e, &e.slots[i]);
+        destroy_slot_sync(&e, &e.slots[i]);
         if (e.slots[i].buffer) { wl_buffer_destroy(e.slots[i].buffer); }
     }
+    if (e.surface_sync) { wp_linux_drm_syncobj_surface_v1_destroy(e.surface_sync); }
+    if (e.syncobj_manager) { wp_linux_drm_syncobj_manager_v1_destroy(e.syncobj_manager); }
     zwp_linux_dmabuf_v1_destroy(e.dmabuf);
     eglMakeCurrent(e.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(e.egl_display, e.egl_context);

@@ -5,10 +5,43 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch",
+            "name": "Launch shm",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceRoot}/build/hello_wayland",
+            "args": [],
+            "cwd": "${workspaceRoot}",
+            "env": {
+                "WAYLAND_DEBUG": "1"
+            }
+        },
+        {
+            "name": "Launch gles-dmabuf",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/hello_wayland_gles_dmabuf",
+            "args": [],
+            "cwd": "${workspaceRoot}",
+            "env": {
+                "WAYLAND_DEBUG": "1"
+            }
+        },
+        {
+            "name": "Launch gles-eglsurface",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/hello_wayland_gles_eglsurface",
+            "args": [],
+            "cwd": "${workspaceRoot}",
+            "env": {
+                "WAYLAND_DEBUG": "1"
+            }
+        },
+        {
+            "name": "Launch vulkan",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/hello_wayland_vulkan",
             "args": [],
             "cwd": "${workspaceRoot}",
             "env": {
