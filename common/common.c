@@ -36,6 +36,9 @@ static void on_global(void* data,
     } else if (strcmp(interface, wl_seat_interface.name) == 0) {
         /* negotiate min(server, what we implement); v5 = pointer frames */
         a->seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 5 ? version : 5);
+    } else if (strcmp(interface, zwp_pointer_gestures_v1_interface.name) == 0) {
+        /* optional: pinch exists since v1, that is all we need */
+        a->gestures = wl_registry_bind(registry, name, &zwp_pointer_gestures_v1_interface, 1);
     }
 }
 
@@ -298,6 +301,66 @@ static const struct wl_pointer_listener pointer_listener = {
     .axis_discrete = on_pointer_axis_discrete,
 };
 
+/* ------------------------------------------------------------------ */
+/* Touchpad pinch: libinput recognizes the gesture, the compositor    */
+/* forwards it as a small begin/update/end transaction on a gesture   */
+/* object hanging off the wl_pointer. `scale` is CUMULATIVE since     */
+/* begin (2.0 = fingers twice as far apart as at the start), so the   */
+/* zoom is anchored to its value at begin rather than integrated.     */
+/* ------------------------------------------------------------------ */
+
+static void on_pinch_begin(void* data,
+                           struct zwp_pointer_gesture_pinch_v1* pinch,
+                           uint32_t serial,
+                           uint32_t time,
+                           struct wl_surface* surface,
+                           uint32_t fingers) {
+    (void)pinch;
+    (void)serial;
+    (void)time;
+    (void)surface;
+    (void)fingers;
+    struct app* a = data;
+    a->zoom_at_pinch_begin = a->zoom;
+}
+
+static void on_pinch_update(void* data,
+                            struct zwp_pointer_gesture_pinch_v1* pinch,
+                            uint32_t time,
+                            wl_fixed_t dx,
+                            wl_fixed_t dy,
+                            wl_fixed_t scale,
+                            wl_fixed_t rotation) {
+    (void)pinch;
+    (void)time;
+    (void)dx;
+    (void)dy;
+    (void)rotation;
+    struct app* a = data;
+    double zoom = a->zoom_at_pinch_begin * wl_fixed_to_double(scale);
+    if (zoom < 0.2) { zoom = 0.2; }
+    if (zoom > 5.0) { zoom = 5.0; }
+    a->zoom = zoom;
+}
+
+static void on_pinch_end(void* data,
+                         struct zwp_pointer_gesture_pinch_v1* pinch,
+                         uint32_t serial,
+                         uint32_t time,
+                         int32_t cancelled) {
+    (void)pinch;
+    (void)serial;
+    (void)time;
+    struct app* a = data;
+    if (cancelled) { a->zoom = a->zoom_at_pinch_begin; }
+}
+
+static const struct zwp_pointer_gesture_pinch_v1_listener pinch_listener = {
+    .begin = on_pinch_begin,
+    .update = on_pinch_update,
+    .end = on_pinch_end,
+};
+
 /* Capabilities are DYNAMIC: unplug the mouse and this fires again. */
 static void on_seat_capabilities(void* data, struct wl_seat* seat, uint32_t caps) {
     struct app* a = data;
@@ -305,7 +368,17 @@ static void on_seat_capabilities(void* data, struct wl_seat* seat, uint32_t caps
     if ((caps & WL_SEAT_CAPABILITY_POINTER) && !a->pointer) {
         a->pointer = wl_seat_get_pointer(seat);
         wl_pointer_add_listener(a->pointer, &pointer_listener, a);
+        if (a->gestures) {
+            /* the gesture object is a child of THIS pointer; it goes
+             * away with it below */
+            a->pinch = zwp_pointer_gestures_v1_get_pinch_gesture(a->gestures, a->pointer);
+            zwp_pointer_gesture_pinch_v1_add_listener(a->pinch, &pinch_listener, a);
+        }
     } else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && a->pointer) {
+        if (a->pinch) {
+            zwp_pointer_gesture_pinch_v1_destroy(a->pinch);
+            a->pinch = NULL;
+        }
         wl_pointer_release(a->pointer);
         a->pointer = NULL;
     }
@@ -455,6 +528,7 @@ int app_init(struct app* a,
     a->backend = backend;
     a->running = 1;
     a->speed = 1.0;
+    a->zoom = 1.0;
     a->pending_w = APP_DEFAULT_WIDTH;
     a->pending_h = APP_DEFAULT_HEIGHT;
 
@@ -500,6 +574,8 @@ void app_run(struct app* a) {
 void app_finish(struct app* a) {
     if (a->cursor_surface) { wl_surface_destroy(a->cursor_surface); }
     if (a->cursor_theme) { wl_cursor_theme_destroy(a->cursor_theme); }
+    if (a->pinch) { zwp_pointer_gesture_pinch_v1_destroy(a->pinch); }
+    if (a->gestures) { zwp_pointer_gestures_v1_destroy(a->gestures); }
     if (a->pointer) { wl_pointer_release(a->pointer); }
     if (a->keyboard) { wl_keyboard_release(a->keyboard); }
     if (a->seat) { wl_seat_destroy(a->seat); }

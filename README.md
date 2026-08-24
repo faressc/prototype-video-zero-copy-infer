@@ -1,6 +1,6 @@
 # hello_wayland — notes
 
-The smallest honest Wayland window — animated, interactive, rendered four ways — plus everything learned while dissecting it. Layout: [common.c](common.c)/[common.h](common.h) hold the shared protocol layer (registry, xdg handshake, seat input, cursor, animation clock, frame loop); each backend is one file hooking in via a two-function vtable (`configure` + `redraw`, embedding `struct app` as first member): [shm.c](shm.c), [gles-eglsurface.c](gles-eglsurface.c), [gles-dmabuf.c](gles-dmabuf.c), [vulkan.c](vulkan.c).
+The smallest honest Wayland window — animated, interactive, rendered four ways — plus everything learned while dissecting it. Layout: [common/](common/) holds the shared protocol layer ([common.c](common/common.c)/[common.h](common/common.h): registry, xdg handshake, seat input + pinch, cursor, animation clock, frame loop); [hello/](hello/) holds the four single-file references, each hooking in via a two-function vtable (`configure` + `redraw`, embedding `struct app` as first member): [shm.c](hello/shm.c), [gles-eglsurface.c](hello/gles-eglsurface.c), [gles-dmabuf.c](hello/gles-dmabuf.c), [vulkan.c](hello/vulkan.c). Stage two (§17) adds [present/](present/) (the swapchain/sync half of each GPU backend as a library) and [scenes/](scenes/) (what gets drawn — the cube); [shaders/](shaders/) holds the GLSL that becomes SPIR-V at build time.
 The core is still one four-beat pipeline: **role → configure/ack → buffer → commit**, with a frame-callback render loop (§6) on top.
 
 ## 1. Where the xdg-shell symbols live
@@ -76,7 +76,7 @@ compositor                              client
 - **The first configure is gated:** attaching a buffer before acking it is a protocol error — the compositor gets to state constraints ("start maximized") before the window ever shows.
 - **Buffer lifetime:** a committed buffer may not be freed (or drawn into!) until `wl_buffer.release` says the compositor stopped reading — it maps the same memory. Details in §6.
 
-Implementation in [common.c](common.c): `on_toplevel_configure` **stages** `pending_w/h` (nothing applied); `on_xdg_surface_configure` acks, applies the size, and calls the backend's `configure` hook (resize resources) + `redraw` — the single point where the batch is consumed.
+Implementation in [common.c](common/common.c): `on_toplevel_configure` **stages** `pending_w/h` (nothing applied); `on_xdg_surface_configure` acks, applies the size, and calls the backend's `configure` hook (resize resources) + `redraw` — the single point where the batch is consumed.
 
 ## 6. Continuous rendering: frame callbacks & double buffering
 
@@ -92,11 +92,11 @@ Implementation in [common.c](common.c): `on_toplevel_configure` **stages** `pend
 One **seat** = one user: a bundle of pointer + keyboard (+ touch) capabilities. Bind it (finally using the version argument: `min(server_version, 5)` — v5 gives pointer frame batching), listen for `capabilities`, and call `get_pointer` / `get_keyboard` for the bits present. Capabilities are **dynamic** — unplug the mouse and the event fires again without that bit, so handle both get and release.
 
 - **Keyboard scancodes are raw** — interpreting them takes the compositor-distributed keymap plus xkbcommon; full walkthrough in §9.
-- **Pointer events are batched** (since v5): enter/motion/axis of one hardware event arrive together, terminated by `wl_pointer.frame` — the stage/apply transaction pattern a third time, now compositor → client. Implemented properly in [common.c](common.c): the event handlers only *stage* into a `struct app_pointer_event` (axis values summed), and `on_pointer_frame` *applies* the batch atomically and clears it — that's what keeps a diagonal touchpad scroll one gesture instead of an L-shaped pair. Coordinates are surface-local `wl_fixed_t` (24.8 fixed point). Exception: `set_cursor` stays in the enter handler — it's a protocol *reply* to the enter (like pong answers ping), not application state.
+- **Pointer events are batched** (since v5): enter/motion/axis of one hardware event arrive together, terminated by `wl_pointer.frame` — the stage/apply transaction pattern a third time, now compositor → client. Implemented properly in [common.c](common/common.c): the event handlers only *stage* into a `struct app_pointer_event` (axis values summed), and `on_pointer_frame` *applies* the batch atomically and clears it — that's what keeps a diagonal touchpad scroll one gesture instead of an L-shaped pair. Coordinates are surface-local `wl_fixed_t` (24.8 fixed point). Exception: `set_cursor` stays in the enter handler — it's a protocol *reply* to the enter (like pong answers ping), not application state.
 - **The cursor inside your window is your responsibility** — no server-side default; see §8.
 - **Input serials authorize privileged requests.** `xdg_toplevel_move(seat, serial)` quotes the button-press serial — proof of fresh user intent; the compositor rejects stale serials, so apps can't fling windows around spontaneously. (Same pattern authorizes clipboard access and popup grabs.)
 
-In [common.c](common.c) — so all three backends inherit it: pointer position steers the gradient origin, left-drag hands the window move to the compositor, scroll scales the animation clock (through zero into reverse), Space pauses, Esc/Q quits.
+In [common.c](common/common.c) — so all three backends inherit it: pointer position steers the gradient origin, left-drag hands the window move to the compositor, scroll scales the animation clock (through zero into reverse), Space pauses, Esc/Q quits.
 
 ## 8. The cursor: just another surface
 
@@ -173,7 +173,7 @@ Ops are **never transmitted**: the wire is bare `[id, opcode, args]` with no sel
 
 Four executables, same gradient, same protocol skeleton — the diffs are the lesson:
 
-| | `hello_wayland` ([shm.c](shm.c)) | `hello_wayland_gles_eglsurface` ([gles-eglsurface.c](gles-eglsurface.c)) | `hello_wayland_gles_dmabuf` ([gles-dmabuf.c](gles-dmabuf.c)) | `hello_wayland_vulkan` ([vulkan.c](vulkan.c)) |
+| | `hello_wayland` ([shm.c](hello/shm.c)) | `hello_wayland_gles_eglsurface` ([gles-eglsurface.c](hello/gles-eglsurface.c)) | `hello_wayland_gles_dmabuf` ([gles-dmabuf.c](hello/gles-dmabuf.c)) | `hello_wayland_vulkan` ([vulkan.c](hello/vulkan.c)) |
 | --- | --- | --- | --- | --- |
 | pixels come from | CPU loop into shm | fragment shader via GLES2 | fragment shader via GLES2 | fragment shader via Vulkan |
 | buffers | our memfd pool + slots | **Mesa's hidden swapchain** behind `EGLSurface` | **our gbm_bo dmabufs + slots** (hand-rolled swapchain) | driver swapchain, **explicit** |
@@ -182,9 +182,9 @@ Four executables, same gradient, same protocol skeleton — the diffs are the le
 | pacing | frame callbacks | frame callbacks | frame callbacks (no swap call exists) | blocking FIFO present (game style) |
 | release tracking | our `busy` flags | Mesa's | our `busy` flags — **back!** | semaphores/fences **you** wire |
 
-**GLES the classic way** ([gles-eglsurface.c](gles-eglsurface.c)): EGL keeps both halves — context factory *plus* window system (`wl_egl_window` → `EGLSurface` → `eglSwapBuffers`). Everything the dmabuf sibling does by hand happens *inside Mesa*: gbm allocation, dmabuf export, `zwp_linux_dmabuf_v1` (bound by Mesa on its private queue — the `{mesa egl surface queue}` lines in `WAYLAND_DEBUG` output), release tracking, and the attach/damage/commit inside the swap call. How GTK/Qt/weston-simple-egl render. One visible scar: a window surface presents with GL's bottom-left origin, so *this* version's vertex shader flips `v_px` (`1.0 − uv.y`) — the FBO version cancels the flip instead. **Diff the two files: the delta IS eglSwapBuffers, unrolled.**
+**GLES the classic way** ([gles-eglsurface.c](hello/gles-eglsurface.c)): EGL keeps both halves — context factory *plus* window system (`wl_egl_window` → `EGLSurface` → `eglSwapBuffers`). Everything the dmabuf sibling does by hand happens *inside Mesa*: gbm allocation, dmabuf export, `zwp_linux_dmabuf_v1` (bound by Mesa on its private queue — the `{mesa egl surface queue}` lines in `WAYLAND_DEBUG` output), release tracking, and the attach/damage/commit inside the swap call. How GTK/Qt/weston-simple-egl render. One visible scar: a window surface presents with GL's bottom-left origin, so *this* version's vertex shader flips `v_px` (`1.0 − uv.y`) — the FBO version cancels the flip instead. **Diff the two files: the delta IS eglSwapBuffers, unrolled.**
 
-**GLES + hand-rolled dmabuf swapchain** ([gles-dmabuf.c](gles-dmabuf.c)): EGL's two halves, separated. GLES structurally cannot create its own context (no `gl*` call runs without one current, and every `gl*` call lacks a context parameter — chicken-and-egg by design, 1992), so EGL survives as a three-call **context factory**: GBM-platform display over our own render-node fd (`/dev/dri/renderD128` — render nodes are the unprivileged GPU door; modesetting stays with the compositor on card0), surfaceless context (`EGL_KHR_surfaceless_context`), MakeCurrent with `EGL_NO_SURFACE`. The **window-system half is gone**: no `wl_egl_window`, no `EGLSurface`, no `eglSwapBuffers`. Instead, per slot: `gbm_bo_create` (LINEAR — real apps negotiate tiled modifiers via dmabuf feedback) → `gbm_bo_get_fd` (GPU memory wearing an fd) → `eglCreateImage` + renderbuffer + FBO (GL renders *into* the dmabuf) → `zwp_linux_dmabuf_v1.create_params`/`add(fd,…)`/`create_immed` → `wl_buffer` — the protocol Mesa used to speak behind our back, now ours, **bound on a private event queue** (the Mesa pattern: roundtrip without dispatching the default queue, so configure can't fire before the context exists). The busy/release/orphan machinery is shm.c verbatim, with GPU memory. Sync: **both ways, at runtime** — when the compositor offers `wp_linux_drm_syncobj_manager_v1` and EGL can export fences (`EGL_ANDROID_native_fence_sync`), the explicit path runs: per slot two DRM syncobj **timelines**, per frame the GL render fence becomes acquire point N (`EGLSyncKHR` → sync_file fd → `drmSyncobjTransfer`) and the compositor signals release point N — `wl_buffer.release` becomes **undefined**, so slot reuse polls `drmSyncobjQuery` instead. Otherwise fallback: `glFlush` + implicit dmabuf fencing (kernel attaches the render fence; compositor waits). `glFinish` is the sledgehammer; NVIDIA (no implicit sync) is why the explicit path exists. Verified live: **zero** `{mesa egl surface queue}` lines — Mesa is no longer a tenant on the socket; 226 dmabuf messages, all ours. Bonus fossil: FBO rendering *cancels* the famous GL y-flip (GL's y=0 row = start of buffer = scanout's top row), so the vertex shader drops the `1.0 − uv.y` that the window-surface version needed. The GLES war stories still apply: shared uniforms must match precision across stages (link error), and **`mediump` is real fp16 on AGX** (max 65504) while desktop drivers treat it as decorative fp32 — pixel-coordinate math overflowed to inf → NaN → banded garbage; fix `precision highp float;` (optional in GLES2 fragment shaders — portable code checks `GL_FRAGMENT_PRECISION_HIGH`).
+**GLES + hand-rolled dmabuf swapchain** ([gles-dmabuf.c](hello/gles-dmabuf.c)): EGL's two halves, separated. GLES structurally cannot create its own context (no `gl*` call runs without one current, and every `gl*` call lacks a context parameter — chicken-and-egg by design, 1992), so EGL survives as a three-call **context factory**: GBM-platform display over our own render-node fd (`/dev/dri/renderD128` — render nodes are the unprivileged GPU door; modesetting stays with the compositor on card0), surfaceless context (`EGL_KHR_surfaceless_context`), MakeCurrent with `EGL_NO_SURFACE`. The **window-system half is gone**: no `wl_egl_window`, no `EGLSurface`, no `eglSwapBuffers`. Instead, per slot: `gbm_bo_create` (LINEAR — real apps negotiate tiled modifiers via dmabuf feedback) → `gbm_bo_get_fd` (GPU memory wearing an fd) → `eglCreateImage` + renderbuffer + FBO (GL renders *into* the dmabuf) → `zwp_linux_dmabuf_v1.create_params`/`add(fd,…)`/`create_immed` → `wl_buffer` — the protocol Mesa used to speak behind our back, now ours, **bound on a private event queue** (the Mesa pattern: roundtrip without dispatching the default queue, so configure can't fire before the context exists). The busy/release/orphan machinery is shm.c verbatim, with GPU memory. Sync: **both ways, at runtime** — when the compositor offers `wp_linux_drm_syncobj_manager_v1` and EGL can export fences (`EGL_ANDROID_native_fence_sync`), the explicit path runs: per slot two DRM syncobj **timelines**, per frame the GL render fence becomes acquire point N (`EGLSyncKHR` → sync_file fd → `drmSyncobjTransfer`) and the compositor signals release point N — `wl_buffer.release` becomes **undefined**, so slot reuse polls `drmSyncobjQuery` instead. Otherwise fallback: `glFlush` + implicit dmabuf fencing (kernel attaches the render fence; compositor waits). `glFinish` is the sledgehammer; NVIDIA (no implicit sync) is why the explicit path exists. Verified live: **zero** `{mesa egl surface queue}` lines — Mesa is no longer a tenant on the socket; 226 dmabuf messages, all ours. Bonus fossil: FBO rendering *cancels* the famous GL y-flip (GL's y=0 row = start of buffer = scanout's top row), so the vertex shader drops the `1.0 − uv.y` that the window-surface version needed. The GLES war stories still apply: shared uniforms must match precision across stages (link error), and **`mediump` is real fp16 on AGX** (max 65504) while desktop drivers treat it as decorative fp32 — pixel-coordinate math overflowed to inf → NaN → banded garbage; fix `precision highp float;` (optional in GLES2 fragment shaders — portable code checks `GL_FRAGMENT_PRECISION_HIGH`).
 
 **Vulkan** (the explicit way): every shm.c concept returns wearing an API name — `minImageCount`/present mode = `SLOTS` and double-vs-triple; `vkAcquireNextImageKHR` = the free-slot scan; the `imageAvailable` semaphore = `busy → 0`; `vkQueuePresentKHR` = attach+damage+commit; swapchain recreation with `oldSwapchain` = fresh-pool-per-resize with orphan draining. Even `currentExtent == 0xFFFFFFFF` is the Vulkan spelling of configure's "0 = you pick". Shaders are compiled at **build time** ([shaders/](shaders/) → SPIR-V via glslc — the wayland-scanner pattern: spec compiled to artifact, runtime merely loads); the driver only does SPIR-V → GPU-ISA at pipeline creation (the step games hide behind loading screens; Mesa caches it in `~/.cache/mesa_shader_cache`). Uses Vulkan 1.3 dynamic rendering (no render-pass/framebuffer objects; we do image layout transitions with barriers instead), 2 frames in flight, dynamic viewport so resize only rebuilds the swapchain, never the pipeline.
 
@@ -192,7 +192,7 @@ Building the Vulkan demo needs a GLSL→SPIR-V compiler: `sudo dnf install glslc
 
 ## 15. Inside the GLES backend: how a triangle becomes pixels
 
-[shm.c](shm.c)'s `fill_gradient` is one function; the GPU version shatters it across a pipeline. Same math, new homes:
+[shm.c](hello/shm.c)'s `fill_gradient` is one function; the GPU version shatters it across a pipeline. Same math, new homes:
 
 ```text
 verts[] = {-1,-1, 3,-1, -1,3}        ONE oversized triangle: covers the ±1 square
@@ -254,7 +254,7 @@ s->fbo ──color attachment 0──► s->rbo ──storage──► s->image 
 
 ### shm.c ↔ gles-dmabuf.c: the full dictionary
 
-| | [shm.c](shm.c) | [gles-dmabuf.c](gles-dmabuf.c) |
+| | [shm.c](hello/shm.c) | [gles-dmabuf.c](hello/gles-dmabuf.c) |
 | --- | --- | --- |
 | allocate | `memfd_create` + `ftruncate` (you are the allocator) | `gbm_bo_create` (driver is: placement, alignment, layout) |
 | memory as fd | the memfd | PRIME export: `gbm_bo_get_fd` |
@@ -281,7 +281,7 @@ Steady state is a closed ring: frame `done` → advance clock, schedule next cal
 
 ## 16. Inside the Vulkan backend: lanes, plates, and three hand-offs
 
-[vulkan.c](vulkan.c) is structurally the return of [gles-eglsurface.c](gles-eglsurface.c), not of the dmabuf sibling: the swapchain is driver-owned again (Mesa's **WSI** — Window System Integration — the part of the Vulkan driver that allocates the dmabufs, speaks `zwp_linux_dmabuf_v1`/`wp_linux_drm_syncobj_v1`/`wp_fifo_v1` on its `{mesa vk display queue}`, tracks releases, and answers frame callbacks). But every knob EGL welded shut is a struct field, and every synchronization edge EGL crossed silently is an object you create. Vulkan adds no concept to shm.c: it splits each of shm.c's implicit "I'm done" moments into an explicit object, gives each object **one raiser and one lowerer**, and sizes each array by **how many of that hand-off can be pending at once**.
+[vulkan.c](hello/vulkan.c) is structurally the return of [gles-eglsurface.c](hello/gles-eglsurface.c), not of the dmabuf sibling: the swapchain is driver-owned again (Mesa's **WSI** — Window System Integration — the part of the Vulkan driver that allocates the dmabufs, speaks `zwp_linux_dmabuf_v1`/`wp_linux_drm_syncobj_v1`/`wp_fifo_v1` on its `{mesa vk display queue}`, tracks releases, and answers frame callbacks). But every knob EGL welded shut is a struct field, and every synchronization edge EGL crossed silently is an object you create. Vulkan adds no concept to shm.c: it splits each of shm.c's implicit "I'm done" moments into an explicit object, gives each object **one raiser and one lowerer**, and sizes each array by **how many of that hand-off can be pending at once**.
 
 ### Three workers, three hand-offs
 
@@ -377,7 +377,7 @@ Everything before the loop exists so step 4 costs microseconds: instance + `vkCr
 
 ### shm.c ↔ gles-dmabuf.c ↔ vulkan.c: the sync dictionary
 
-| | [shm.c](shm.c) | [gles-dmabuf.c](gles-dmabuf.c) | [vulkan.c](vulkan.c) |
+| | [shm.c](hello/shm.c) | [gles-dmabuf.c](hello/gles-dmabuf.c) | [vulkan.c](hello/vulkan.c) |
 | --- | --- | --- | --- |
 | plates | memfd pool slots | your `gbm_bo`s | swapchain images (WSI's dmabufs) |
 | "free to write" | `busy == 0`, CPU check | syncobj release point poll | `image_avail` — GPU waits |
@@ -387,6 +387,40 @@ Everything before the loop exists so step 4 costs microseconds: instance + `vkCr
 | resize | new pool, orphans | new BOs | `oldSwapchain` |
 | release/attach machinery run by | you | you | Mesa's WSI |
 
-## 17. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+## 17. Stage two: the cube, and the presenter/scene split
 
-`pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into a static `xdg_shell_protocol` library shared by everything. `app_common` (from `common.c`) layers the client boilerplate on top, pulling in `xkbcommon` (keymap compilation, scancode → keysym) and `wayland-cursor` (XCursor theme → wl_buffers); each backend executable is one source file linked against `app_common` plus its GPU stack (`egl glesv2 gbm libdrm` + a second generated protocol binding for linux-dmabuf, or `vulkan` + the glslc shader step).
+The four `hello_*` files stay frozen as single-file references. Everything after them is built on a different cut: **presenter** (owns the context, the swapchain, the sync objects, and the present loop — extracted nearly verbatim from the hello files, so the protocol traffic is unchanged) and **scene** (owns meshes, shaders, matrices — the only code that changes from stage to stage). The seam is a four-function vtable (`init` / `resize` / `draw`-or-`record` / `fini`); the presenter binds a target and calls the scene, the scene fills it and returns, the presenter presents it. The scene never sees a `wl_buffer`, a slot, a semaphore, or a fence; the presenter never sees a shader, a vertex, or a uniform.
+
+| | [gles_present.c](present/gles_present.c) (`GLES_MODE_DMABUF` / `GLES_MODE_EGLSURFACE`) | [vk_present.c](present/vk_present.c) |
+| --- | --- | --- |
+| absorbed from | gles-dmabuf.c + gles-eglsurface.c — the mode enum *is* the README's "delta = eglSwapBuffers" as a `switch` | vulkan.c — `draw_frame` split into begin (fence, acquire, to-color barrier) / end (to-present barrier, submit, present) around `scene->record` |
+| target handed to the scene | `struct gles_target { fbo, width, height, slot }` — FBO already bound | `struct vk_frame { cmd, color view, depth view, image_index, lane, extent }` — the scene records `vkCmdBeginRendering … End` itself, because it decides the attachments |
+| depth (opt-in flag) | dmabuf: one `GL_DEPTH_COMPONENT16` renderbuffer shared by both slots (the compositor never reads depth, so it is not a dmabuf; one context renders frames sequentially); eglsurface: `EGL_DEPTH_SIZE` in the config, Mesa allocates it | a `VkImage` + `VkDeviceMemory` — the project's first `vkAllocateMemory`: create → `vkGetImageMemoryRequirements` → `vk_present_find_memory_type` (bit i of `memoryTypeBits` = type i acceptable, then filter by property flags) → allocate → bind → view. Shared by both lanes; a per-frame barrier on `EARLY\|LATE_FRAGMENT_TESTS` orders it after the previous frame's use |
+| helpers | `p->y_down` | `vk_present_find_memory_type`, `vk_present_load_shader` |
+
+**The cube** ([cube_mesh.h](scenes/cube_mesh.h), [scene_cube_gles.c](scenes/scene_cube_gles.c), [scene_cube_vk.c](scenes/scene_cube_vk.c), [shaders/cube.vert](shaders/cube.vert)/[.frag](shaders/cube.frag), matrices in [mat4.h](scenes/mat4.h)): 24 vertices (position, normal, color — four per face so normals stay flat), 36 indices, CCW from outside, one directional light. The clock from common.c spins it, the pointer tilts it. What is new versus the gradient, per API:
+
+| | GLES | Vulkan |
+| --- | --- | --- |
+| mesh in GPU memory | `glBufferData` (VBO + IBO) | `VkBuffer` + memory, host-visible/coherent, `vkMapMemory` + `memcpy` — on unified memory (AGX) this *is* the fast path; discrete GPUs want `DEVICE_LOCAL` + a staging copy |
+| vertex layout | `glVertexAttribPointer` ×3 with stride/offset, per draw | the vertex-input form from §16, **filled in** — one binding, three `R32G32B32_SFLOAT` attributes, frozen into the pipeline; `vkCmdBindVertexBuffers` + `vkCmdBindIndexBuffer` per draw |
+| matrices | `glUniformMatrix4fv` ×2 | two `mat4` push constants = 128 bytes, the guaranteed minimum, fully spent |
+| depth / cull | `glEnable(GL_DEPTH_TEST)`, `glEnable(GL_CULL_FACE)` | `VkPipelineDepthStencilStateCreateInfo` (test + write, `LESS`), `cullMode = BACK`, plus `depthAttachmentFormat` in the rendering info and a depth attachment (clear 1.0, `storeOp DONT_CARE`) in `VkRenderingInfo` |
+| draw | `glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_SHORT)` | `vkCmdDrawIndexed(36, 1, 0, 0, 0)` — `gl_VertexIndex` now comes from the index buffer |
+| clear | `glClear(COLOR \| DEPTH)` | `loadOp = CLEAR` on both attachments — `DONT_CARE` was only legal for the gradient because the fullscreen triangle provably covered every pixel |
+
+**Three clip spaces, one mesh.** `mat4_perspective` takes two flags, and they are the *entire* per-backend difference in the transform chain — but flipping y also flips the winding each API observes, and the two APIs judge winding differently:
+
+| backend | presents with | projection | front face |
+| --- | --- | --- | --- |
+| GLES / EGLSurface | GL-native, y up, z ∈ [−1, 1] | `y_down = 0` | `GL_CCW` — the textbook configuration |
+| GLES / dmabuf FBO | row 0 = top (§14: FBO rendering cancels the flip), z ∈ [−1, 1] | `y_down = 1` | `GL_CW` — GL judges winding in *its* window coords (y up), where the flipped projection made the mesh CW |
+| Vulkan | y down, z ∈ [0, 1] | `y_down = 1`, `z_zero_to_one = 1` | `COUNTER_CLOCKWISE` — Vulkan judges winding *as seen on screen* (framebuffer coords, y down), where the flipped projection shows it CCW, upright |
+
+Same picture on screen in all three; the API-side setting differs in each. Get the front face wrong with culling on and the cube renders inside-out — every visible face lit from behind.
+
+**A bug the cube exposed:** vulkan.c picks the surface format from a fixed 32-entry array and falls back to `formats[0]`. Honeykrisp lists **88** formats; `B8G8R8A8_UNORM` sits past the cut, so the fallback — an `*_SRGB` format — wins, and the driver gamma-encodes every write: a linear 0.08 clear shows as ~0.31 gray. The gradient's computed colors never gave it away; the cube's clear color next to the GL windows did. [vk_present.c](present/vk_present.c) does the two-call enumeration (count, allocate, fetch) and requires UNORM + `SRGB_NONLINEAR` — "store what the shader writes," the same contract as the GL paths' XRGB8888 dmabufs. (An sRGB swapchain is the *right* choice for a linear-light renderer; this project writes display-referred values like the GL backends.)
+
+## 18. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+
+`pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into a static `xdg_shell_protocol` library shared by everything. `app_common` (from `common.c`) layers the client boilerplate on top, pulling in `xkbcommon` (keymap compilation, scancode → keysym) and `wayland-cursor` (XCursor theme → wl_buffers); each `hello_*` executable is one source file linked against `app_common` plus its GPU stack (`egl glesv2 gbm libdrm` + a second generated protocol binding for linux-dmabuf, or `vulkan` + the glslc shader step, now an `add_spirv_shaders()` function). Stage two adds two static libraries — `gles_present` (app_common + both dmabuf/syncobj protocol bindings + `egl glesv2 gbm libdrm wayland-egl`) and `vk_present` (app_common + `vulkan`) — and three executables on top: `cube_gles_dmabuf` and `cube_gles_eglsurface` (one scene source, `CUBE_GLES_MODE` picks the presenter mode at compile time) and `cube_vulkan` (scene + `cube.vert`/`cube.frag` → SPIR-V).

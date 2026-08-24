@@ -133,8 +133,8 @@ static void egl_configure(struct app* a) {
          * (contrast the sibling's surfaceless context, current since
          * main). */
         e->egl_window = wl_egl_window_create(a->surface, a->width, a->height);
-        e->egl_surface = eglCreatePlatformWindowSurface(e->egl_display, e->egl_config,
-                                                        e->egl_window, NULL);
+        e->egl_surface =
+            eglCreatePlatformWindowSurface(e->egl_display, e->egl_config, e->egl_window, NULL);
         if (e->egl_surface == EGL_NO_SURFACE) {
             fprintf(stderr, "eglCreatePlatformWindowSurface failed\n");
             exit(1);
@@ -184,7 +184,9 @@ static const struct app_backend egl_backend = {
 int main(void) {
     struct egl_app e = {0};
 
-    if (app_init(&e.app, &egl_backend, "hello wayland (GLES/EGLSurface)",
+    if (app_init(&e.app,
+                 &egl_backend,
+                 "hello wayland (GLES/EGLSurface)",
                  "hello-wayland-gles-eglsurface") < 0) {
         return 1;
     }
@@ -201,9 +203,16 @@ int main(void) {
     eglBindAPI(EGL_OPENGL_ES_API);
 
     static const EGLint config_attribs[] = {
-        EGL_SURFACE_TYPE,    EGL_WINDOW_BIT, /* window surfaces this time */
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+        EGL_SURFACE_TYPE,
+        EGL_WINDOW_BIT, /* window surfaces this time */
+        EGL_RENDERABLE_TYPE,
+        EGL_OPENGL_ES2_BIT,
+        EGL_RED_SIZE,
+        8,
+        EGL_GREEN_SIZE,
+        8,
+        EGL_BLUE_SIZE,
+        8,
         EGL_NONE,
     };
     EGLint n = 0;
@@ -213,8 +222,7 @@ int main(void) {
     }
 
     static const EGLint ctx_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-    e.egl_context = eglCreateContext(e.egl_display, e.egl_config, EGL_NO_CONTEXT,
-                                     ctx_attribs);
+    e.egl_context = eglCreateContext(e.egl_display, e.egl_config, EGL_NO_CONTEXT, ctx_attribs);
     if (e.egl_context == EGL_NO_CONTEXT) {
         fprintf(stderr, "eglCreateContext failed\n");
         return 1;

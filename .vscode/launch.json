@@ -47,6 +47,30 @@
             "env": {
                 "WAYLAND_DEBUG": "1"
             }
+        },
+        {
+            "name": "Launch cube gles-dmabuf",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cube_gles_dmabuf",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "Launch cube gles-eglsurface",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cube_gles_eglsurface",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "Launch cube vulkan",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cube_vulkan",
+            "args": [],
+            "cwd": "${workspaceRoot}"
         }
     ]
 }

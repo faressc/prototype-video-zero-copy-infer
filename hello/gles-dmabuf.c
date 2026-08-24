@@ -261,8 +261,7 @@ static void destroy_slot_sync(struct egl_app* e, struct egl_slot* s) {
 static int slot_is_free(struct egl_app* e, struct egl_slot* s) {
     if (s->busy && e->surface_sync) {
         uint64_t value = 0;
-        if (drmSyncobjQuery(e->drm_fd, &s->release_syncobj, &value, 1) == 0 &&
-            value >= s->point) {
+        if (drmSyncobjQuery(e->drm_fd, &s->release_syncobj, &value, 1) == 0 && value >= s->point) {
             s->busy = 0;
         }
     }

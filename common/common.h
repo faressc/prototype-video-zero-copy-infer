@@ -24,6 +24,7 @@
 #include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "pointer-gestures-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 /* fallback size when the compositor has no opinion (configure sends 0) */
@@ -103,6 +104,16 @@ struct app {
     double speed;
     int paused;
     int animating; /* frame-callback loop started? */
+
+    /* touchpad pinch (zwp_pointer_gestures_v1): a gesture object per
+     * wl_pointer, events begin/update/end; update carries the scale
+     * relative to where the fingers STARTED, so zoom = zoom-at-begin *
+     * scale. Scenes with a camera apply `zoom` (1.0 = default); the
+     * gradients ignore it. NULL when the compositor lacks the global. */
+    struct zwp_pointer_gestures_v1* gestures;
+    struct zwp_pointer_gesture_pinch_v1* pinch;
+    double zoom;
+    double zoom_at_pinch_begin;
 
     int running;
 };
