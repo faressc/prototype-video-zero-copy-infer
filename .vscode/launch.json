@@ -49,6 +49,14 @@
             }
         },
         {
+            "name": "Launch cube shm",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cube_shm",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        },
+        {
             "name": "Launch cube gles-dmabuf",
             "type": "lldb",
             "request": "launch",

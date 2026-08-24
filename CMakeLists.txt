@@ -152,6 +152,15 @@ endif()
 #    library (extracted from hello/) and a scene that plugs into it via a
 #    four-function vtable.
 # ---------------------------------------------------------------------------
+# the CPU presenter + the cube through a software rasterizer: every
+# pipeline stage the GPU scenes declare in a struct, as a loop
+add_library(shm_present STATIC present/shm_present.c present/shm_present.h)
+target_include_directories(shm_present PUBLIC present)
+target_link_libraries(shm_present PUBLIC app_common)
+
+add_executable(cube_shm scenes/scene_cube_shm.c scenes/cube_mesh.h scenes/mat4.h)
+target_link_libraries(cube_shm PRIVATE shm_present m)
+
 pkg_check_modules(GLES_PRESENT_STACK REQUIRED IMPORTED_TARGET egl glesv2 gbm libdrm wayland-egl)
 add_library(gles_present STATIC present/gles_present.c present/gles_present.h)
 target_include_directories(gles_present PUBLIC present)

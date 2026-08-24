@@ -43,6 +43,15 @@ static inline mat4 mat4_mul(mat4 a, mat4 b) {
     return r;
 }
 
+/* out = m * v, for a 4-component column vector -- what the GPU does per
+ * vertex when the shader writes `gl_Position = mvp * vec4(pos, 1.0)`. */
+static inline void mat4_mul_vec4(const mat4* m, const float v[4], float out[4]) {
+    for (int row = 0; row < 4; row++) {
+        out[row] = m->m[0 * 4 + row] * v[0] + m->m[1 * 4 + row] * v[1] + m->m[2 * 4 + row] * v[2] +
+                   m->m[3 * 4 + row] * v[3];
+    }
+}
+
 static inline mat4 mat4_translate(float x, float y, float z) {
     mat4 r = mat4_identity();
     r.m[12] = x;
