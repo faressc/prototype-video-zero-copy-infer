@@ -279,6 +279,114 @@ Why per-slot BOs instead of one sliced pool: memfd bytes are dumb — subdividin
 
 Steady state is a closed ring: frame `done` → advance clock, schedule next callback, redraw into a free slot → commit → compositor repaints → `release` events return slots. Hidden window → no callbacks → the app sleeps in `wl_display_dispatch` at zero CPU.
 
-## 16. Build wiring ([CMakeLists.txt](CMakeLists.txt))
+## 16. Inside the Vulkan backend: lanes, plates, and three hand-offs
+
+[vulkan.c](vulkan.c) is structurally the return of [gles-eglsurface.c](gles-eglsurface.c), not of the dmabuf sibling: the swapchain is driver-owned again (Mesa's **WSI** — Window System Integration — the part of the Vulkan driver that allocates the dmabufs, speaks `zwp_linux_dmabuf_v1`/`wp_linux_drm_syncobj_v1`/`wp_fifo_v1` on its `{mesa vk display queue}`, tracks releases, and answers frame callbacks). But every knob EGL welded shut is a struct field, and every synchronization edge EGL crossed silently is an object you create. Vulkan adds no concept to shm.c: it splits each of shm.c's implicit "I'm done" moments into an explicit object, gives each object **one raiser and one lowerer**, and sizes each array by **how many of that hand-off can be pending at once**.
+
+### Three workers, three hand-offs
+
+```text
+                 command buffers                      images (dmabufs)
+   ┌───────┐  ────────────────────►  ┌───────┐  ────────────────────────►  ┌────────────┐
+   │  CPU  │                         │  GPU  │                             │ COMPOSITOR │
+   │       │  ◄───── fence ─────────  │       │  ◄──── image_avail ────────  │ (+ display │
+   └───────┘   "card finished"       └───────┘   "image free to write"      │  hardware) │
+                                          │─────── render_done ──────────►  └────────────┘
+                                                 "image ready to read"
+```
+
+Every sync object is one worker telling another *"I'm done with what you gave me."*
+
+| object | raised ↑ by | lowered ↓ by | count | sized by |
+| --- | --- | --- | --- | --- |
+| `in_flight` (`VkFence`) | GPU, when the submission completes | CPU, `vkResetFences` | 2 | lanes |
+| `image_avail` (`VkSemaphore`) | the driver, when the *acquired* image is free | GPU — its wait at submit consumes it | 2 | lanes |
+| `render_done` (`VkSemaphore`) | GPU, when the submission completes | presentation engine — its wait at present consumes it | 4 | images |
+
+A binary semaphore is lowered by *whoever waits on it*; there is no "lower" call. Only the fence is reset by hand, because its waiter is the CPU. Semaphores appear only in **queue operations** (`vkQueueSubmit`, `vkQueuePresentKHR`, `vkAcquireNextImageKHR`) — never inside a command buffer; `VkSubmitInfo` is the envelope wrapped around the recorded list. Underneath, on Linux, all three are kernel `drm_syncobj`s — the same objects as §14's explicit-sync timelines; `VkFence` is the CPU-facing wrapper, `VkSemaphore` the GPU/WSI-facing one, which is why the WSI can chain a compositor release fence straight into a semaphore (`drmSyncobjTransfer`, the gles-dmabuf call in the other direction).
+
+**"Free to write" and "done writing" are opposite arrows on the same image.** `image_avail` is the compositor side letting the GPU *start*; `render_done` + fence are the GPU saying it *finished*. Same image, two moments, two directions.
+
+### Two lanes, four plates
+
+- **Lanes** = `MAX_FRAMES_IN_FLIGHT = 2`: each owns a command buffer, an `image_avail`, a fence. A frame occupies a lane from the fence wait until the GPU finishes it. The fence at the lane's gate (`vkWaitForFences`, top of `draw_frame`) guarantees one frame per lane at a time — so two frames never hold the same flag, and a flag handed to acquire is always clean (fence signaled ⇒ submission done ⇒ its wait on `image_avail[f]` was satisfied ⇒ the earlier signal fired and was consumed ⇒ no pending operation ⇒ legal to reuse). Fences are born signaled (`VK_FENCE_CREATE_SIGNALED_BIT`) or frame 0 deadlocks on its first line. More lanes = the CPU may run further ahead of the GPU = more latency, never more speed.
+- **Plates** = the swapchain images (`minImageCount + 1` = 4 here): each has a view and a `render_done`. A plate is busy from acquire until the compositor *releases* it — potentially several refreshes. The WSI keeps the `busy` table: shm.c's flags, inside Mesa.
+
+A frame passes through its lane in microseconds and leaves its plate out in the world for milliseconds. Two lanes gate the doorway; four plates fill the room. `image_avail` is not "for image 0" in the driver's books — it is for *one acquire*, linked to at most one specific pending release, discharged before the fence lets it be handed out again. Releases feed the free list (per image, WSI-owned); raises are issued per acquire (per lane, one-shot). A release only fires a semaphore if an acquire is *currently* waiting on *that image's* release through such a link; otherwise it just marks the image free.
+
+**Why the semaphore exists at all, when a `busy` scan sufficed in shm.c:** the writer is no longer the CPU. `vkAcquireNextImageKHR` gives the *index* now and the *permission* later, on the GPU timeline — so the CPU records and submits without waiting, and the GPU stalls only at `COLOR_ATTACHMENT_OUTPUT` (`pWaitDstStageMask`) if the image isn't back yet. On Mesa's classic Wayland path acquire blocks until a release arrives and signals the semaphore before returning (the flag is up when you get the index; the GPU wait costs nothing); on the explicit-sync path the WSI may return early and import the release point into the semaphore. Same source, correct under both — Vulkan's rule: an ordering that isn't written on the GPU timeline doesn't exist.
+
+**Why `render_done` is per image, not per lane:** presents have no completion fence. `vkQueuePresentKHR` returns immediately; the presentation engine consumes the semaphore whenever it processes that present, possibly frames later. A lane-indexed semaphore could be re-signaled while a present was still waiting on it (fast GPU + slow-to-flip compositor — exactly what FIFO creates). Indexing by image makes reacquiring the same image the reuse proof: the engine won't hand an image out again before its previous present is fully processed. (`VK_EXT_swapchain_maintenance1` adds optional present fences to close the gap; validation layers only began flagging the per-frame pattern around SDK 1.3.275, so older tutorials show the subtly wrong version.)
+
+### One frame, all objects (`draw_frame`)
+
+```text
+CPU   1. wait fence[f]                      gate: lane f empty?
+      2. acquire → img, hand over image_avail[f]
+             WSI: img free?  yes → signal image_avail[f] now
+                             no  → link img's pending release fence → image_avail[f]
+                             none free at all → block here  (FIFO's 60 Hz lives here)
+      3. reset fence[f]                     after acquire, so every locked fence gets a submit
+      4. record cmd[f]:  barrier UNDEFINED→COLOR · begin rendering on views[img] (loadOp DONT_CARE,
+                         storeOp STORE) · dynamic viewport/scissor · bind pipeline · push 20 bytes ·
+                         draw 3 · end · barrier COLOR→PRESENT_SRC
+      5. submit:  wait image_avail[f] @ color stage · run cmd[f] · signal render_done[img] + fence[f]
+      6. present: wait render_done[img] · show img     WSI: attach wl_buffer twin of img, commit,
+                                                       syncobj acquire point = render_done
+      7. f = (f+1) % 2
+
+GPU         honors the semaphore wait (stalls only if img not free yet), renders, signals both
+COMPOSITOR  waits the acquire point, reads/scans out img, later releases it
+            → wl_buffer.release / syncobj release point → WSI marks img free
+```
+
+Two things are recorded, none executed: every `vkCmd*` writes an entry; `vkQueueSubmit` is the only line that makes the GPU do anything (§10's "mail written but not posted," with the envelope explicit). The two barriers are the layout transitions a `VkRenderPass` used to perform implicitly at its boundaries — dynamic rendering (1.3) abolished render pass + framebuffer objects (a plan for tile-based GPUs: declare every attachment's load/store/layout and multi-subpass dependencies up front so intermediate results stay on-chip) and moved each fact to its moment of use: format → pipeline creation (`VkPipelineRenderingCreateInfo` on the `pNext` chain, `renderPass = VK_NULL_HANDLE`), load/store + image → `vkCmdBeginRendering`, transitions → your barriers. `pNext` is the ABI-stable extension idiom: structs frozen in 1.0 grow by chaining `sType`-tagged nodes, never by adding fields — the same move as `create_device`'s `VkPhysicalDeviceDynamicRenderingFeatures`.
+
+**Where the rhythm comes from:** nothing in the code sets a frame rate. Under FIFO the compositor releases one plate per refresh; when all four are out, step 2 blocks; each release lets one frame through. Present mode is the only knob: **FIFO** — plates queue in order, nothing dropped, latency ≈ plates queued ahead of the display (more images = more lag; `min+1` is a *choice* trading one frame of latency for never-blocking acquire). **MAILBOX** — the compositor's pending slot is the mailbox (plain Wayland commits already overwrite; FIFO is the thing that needed a new protocol, `wp_fifo_v1`), newest wins, superseded plates come back instantly unshown, the loop runs at GPU speed; needs 4 plates because the display path holds two (scanning out + queued for flip), the mailbox one, you one. Neither mode copies pixels — "replacing" is reference bookkeeping. The frame-callback loops of the other three backends are the *low-latency* discipline: one frame per refresh, just in time, never queued ahead; real Vulkan apps rebuild it on top of FIFO (`VK_KHR_present_wait`, commit-timing protocols). The gradient origin follows the pointer, so the lag is visible: compare `min+1`, `min`, MAILBOX, and the shm build by moving the mouse fast.
+
+**Resize:** `vk_configure` only sets `resized`; acquire/present return `OUT_OF_DATE`/`SUBOPTIMAL`. Either way `vkDeviceWaitIdle` (the `glFinish` of teardown), destroy views + `render_done`, `vkCreateSwapchainKHR` with `oldSwapchain` (the orphan pattern: old plates drain through the WSI — the `discarded wl_buffer.release()` lines in `WAYLAND_DEBUG` are release events crossing the WSI's `wl_buffer.destroy` on the wire, dropped on a zombie proxy until `wl_display.delete_id` retires the ID), new views + semaphores. The pipeline survives because viewport/scissor are `VK_DYNAMIC_STATE`. The early return after a failed acquire happens *before* the fence reset, so the fence stays signaled and the lane retries cleanly.
+
+### The two barriers, precisely
+
+`VkImageMemoryBarrier` bundles two independent mechanisms, and each barrier in `draw_frame` needs both:
+
+1. **Layout transition.** A `VkImage` is not a row-major pixel array: GPUs store images in hardware-specific swizzled/tiled arrangements, often with lossless compression and side-band metadata, and the best arrangement differs per use (color-write path, texture sampling, scanout/cross-process sharing). Vulkan exposes this as the image's *layout* (`COLOR_ATTACHMENT_OPTIMAL`, `SHADER_READ_ONLY_OPTIMAL`, `PRESENT_SRC_KHR`, …). The driver tracks nothing; you declare `oldLayout → newLayout` and it inserts whatever the hardware needs (decompress, retile, or nothing). Wrong layouts = silent corruption on hardware where arrangements differ and no symptom where they don't — hence validation layers, and "works on my GPU" proving nothing.
+2. **Execution + memory dependency.** The GPU pipeline is deep and overlapping with non-coherent per-stage caches; Vulkan guarantees no ordering between commands beyond what you state, even inside one command buffer. `srcStage/srcAccess` = what must finish first and which writes must be *made available* (flushed); `dstStage/dstAccess` = what must wait and which reads must see them *visible* (invalidated).
+
+| | barrier 1 (before rendering) | barrier 2 (after rendering) |
+| --- | --- | --- |
+| layout | `UNDEFINED → COLOR_ATTACHMENT_OPTIMAL` — "arrange for color writes; current contents are garbage, don't preserve" (a *permission* that lets the driver skip decompressing last frame) | `COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR` — "arrange for the presentation engine/compositor/display" |
+| src | `TOP_OF_PIPE`, access 0 — nothing earlier in this queue to wait for (the real previous user, the compositor, is ordered by the `image_avail` semaphore at submit) | `COLOR_ATTACHMENT_OUTPUT`, `COLOR_ATTACHMENT_WRITE` — all pixel writes complete and flushed |
+| dst | `COLOR_ATTACHMENT_OUTPUT`, `COLOR_ATTACHMENT_WRITE` — transition done before the color stage writes; vertex work may overlap | `BOTTOM_OF_PIPE`, access 0 — no consumer inside this submission; the consumer is the presentation engine, ordered by `render_done` (signaled at completion, which implies bottom-of-pipe passed) |
+
+A `VkRenderPass` carried `initialLayout`/`finalLayout` and performed exactly this pair implicitly at its boundaries; dynamic rendering makes them explicit commands around `vkCmdBeginRendering`/`vkCmdEndRendering`. A 3D renderer adds more between passes (`COLOR_ATTACHMENT_OPTIMAL → SHADER_READ_ONLY_OPTIMAL` when a pass's output is sampled by the next, plus depth transitions). GL's driver inserted all of this itself on every bind/draw — the hidden per-call bookkeeping that made GL drivers slow and unpredictable; Vulkan pays the ordering cost only where the program says it must.
+
+### `vkQueuePresentKHR`, precisely
+
+A *queue operation* (externally synchronized like `vkQueueSubmit`; the queue's family must be presentation-capable — the `pick_device` check). `VkPresentInfoKHR`: `pWaitSemaphores` (no stage mask — presentation isn't a pipeline stage; the wait consumes them), parallel `pSwapchains`/`pImageIndices` arrays (one call can present several swapchains — multi-window, VR eyes), optional `pResults` per swapchain.
+
+Spec semantics: the index must come from an acquire not yet presented; the image must be in `PRESENT_SRC_KHR` when read (barrier 2); **ownership transfers at the call itself**, not when `render_done` signals — after present returns you may not render to, transition, or touch the image until a later acquire returns the same index, even though the GPU may still be writing it (the engine won't *read* before `render_done`); the operation is asynchronous and the spec provides **no completion fence or semaphore** (`VK_EXT_swapchain_maintenance1` present fences later filled the gap) — the only completion signal is a future acquire returning the index; and the call may block under FIFO when the engine's queue is full.
+
+What Mesa's Wayland WSI does inside, in order: (1) forward the semaphore — explicit sync: export `render_done[img]`'s `drm_syncobj` fence as the surface's **acquire point** (`wp_linux_drm_syncobj_surface_v1.set_acquire_point`) and set the **release point** the compositor will signal; implicit sync: the render fence already rides the dmabuf's kernel reservation; (2) `wl_surface.attach(wl_buffer[img])` — the twin created at swapchain creation via `zwp_linux_buffer_params_v1`; (3) `damage_buffer` full (unless `VK_KHR_incremental_present` regions); (4) FIFO pacing — `wp_fifo_v1.set_barrier`/`wait_barrier`, or on the older path request `wl_surface.frame` and block until the previous callback; mailbox skips this; (5) `wl_surface.commit` — the actual shm.c commit; (6) flush its queue; (7) mark the image busy until `wl_buffer.release`/the release point; (8) possibly dispatch its private queue — which is how our default-queue events get read from the socket as a side effect. Return codes: `SUCCESS`; `SUBOPTIMAL_KHR` (shown, but rebuild for next frame); `ERROR_OUT_OF_DATE_KHR` (not shown, rebuild); plus our own `resized` flag from `vk_configure` for a resize the compositor hasn't reflected in `caps` yet. It is not a draw, not a flip, not a copy: it transfers ownership of one already-rendered dmabuf and records one semaphore dependency; the only bytes written are protocol messages.
+
+**Image ownership over one trip:** `vkQueuePresentKHR` → yours → engine (immediately) · GPU finishes → `render_done` ↑ · engine's wait satisfied → commit → compositor reads/scans out · compositor done → release → WSI marks free · later `vkAcquireNextImageKHR` returns the index → engine → yours, with `image_avail` as the write permission. Acquire is the sole door back — nothing in vulkan.c references `wl_buffer.release`, because in shm.c/gles-dmabuf.c *you* were the WSI. Consequence: `images[img]`, `views[img]`, `render_done[img]` must stay valid between present and reacquire — why recreation starts with `vkDeviceWaitIdle` and passes `oldSwapchain` rather than destroying anything while presents are pending.
+
+### The setup that makes the frame cheap
+
+Everything before the loop exists so step 4 costs microseconds: instance + `vkCreateWaylandSurfaceKHR` (the bridge `wl_surface → VkSurfaceKHR`); `pick_device` (a queue family with `GRAPHICS` **and** Wayland present support — presentability is per (device, family, display); Honeykrisp reports one unified family with one queue, `queueFlags = 0b1111`; an NVIDIA desktop reports five: 16 graphics, 2 copy engines, 8 async compute, decode, encode — the code takes the first match either way); `create_device` (queues exist only from creation; `VK_KHR_swapchain` is a *device* extension because core Vulkan is deliberately headless; features default off and must be requested — `wl_registry_bind(version)` for GPUs); the swapchain (`currentExtent == 0xFFFFFFFF` = configure's "0 = you pick"; `minImageCount` is Mesa's answer to how many buffers the Wayland display path holds at once: shm got away with 2 because the compositor *copies* shm at commit and releases immediately; dmabufs are zero-copy loans that last a whole frame, hence 3, +1 ours); the pipeline (both SPIR-V modules — front-end at build time via glslc, back-end SPIR-V → NIR → GPU ISA at `vkCreateGraphicsPipelines`, cached in `~/.cache/mesa_shader_cache`; every fixed-function station as a form: empty `vin` because the vertex shader synthesizes the oversized triangle from `gl_VertexIndex` — "vertices as code," the last rung of the shm → GLES → Vulkan ladder from every-pixel to six-floats to nothing-stored; `TRIANGLE_LIST`; viewport/scissor counts only; no culling, no MSAA, no blending, write mask **must** be `RGBA` because zero means write nothing; `v_uv` out ↔ in matched by `location` number, not name — the `glLinkProgram` moment without string matching; `gl_Position` stays built-in because there is only ever one position, `gl_FragColor` became a user-declared `location = 0` out because there can be many attachments); the layout (20 bytes of push constants matched by byte layout, not name — data that rides the command buffer, so lanes can't race on shared uniform state); pool + two cards + lane sync. Shipping: SPIR-V is the distribution format (embed it or install it — this demo's absolute `SHADER_DIR` is not shippable as-is); Metal is the same two-stage design with MSL → AIR `.metallib` and `MTLBinaryArchive` for the pipeline cache; MoltenVK bridges the two at the SPIR-V → MSL seam.
+
+### shm.c ↔ gles-dmabuf.c ↔ vulkan.c: the sync dictionary
+
+| | [shm.c](shm.c) | [gles-dmabuf.c](gles-dmabuf.c) | [vulkan.c](vulkan.c) |
+| --- | --- | --- | --- |
+| plates | memfd pool slots | your `gbm_bo`s | swapchain images (WSI's dmabufs) |
+| "free to write" | `busy == 0`, CPU check | syncobj release point poll | `image_avail` — GPU waits |
+| "done writing" | loop ended | EGL fence → acquire point | `render_done` → acquire point, inside present |
+| CPU ahead of GPU | n/a | n/a | fence + lanes |
+| pacing | frame callbacks | frame callbacks | FIFO blocks in acquire/present |
+| resize | new pool, orphans | new BOs | `oldSwapchain` |
+| release/attach machinery run by | you | you | Mesa's WSI |
+
+## 17. Build wiring ([CMakeLists.txt](CMakeLists.txt))
 
 `pkg-config` locates `wayland-client` (the lib), `wayland-protocols` (the XML dir), `wayland-scanner` (the generator). Two custom commands generate header (`client-header`) + tables (`private-code`) into a static `xdg_shell_protocol` library shared by everything. `app_common` (from `common.c`) layers the client boilerplate on top, pulling in `xkbcommon` (keymap compilation, scancode → keysym) and `wayland-cursor` (XCursor theme → wl_buffers); each backend executable is one source file linked against `app_common` plus its GPU stack (`egl glesv2 gbm libdrm` + a second generated protocol binding for linux-dmabuf, or `vulkan` + the glslc shader step).

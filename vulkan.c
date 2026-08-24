@@ -98,8 +98,7 @@ static void die(const char* msg) {
 static uint32_t now_ms(struct vk_app* v) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint32_t)((t.tv_sec - v->t0.tv_sec) * 1000
-                      + (t.tv_nsec - v->t0.tv_nsec) / 1000000);
+    return (uint32_t)((t.tv_sec - v->t0.tv_sec) * 1000 + (t.tv_nsec - v->t0.tv_nsec) / 1000000);
 }
 
 /* The backend hook: the loop draws, so configure only records that the
@@ -107,9 +106,8 @@ static uint32_t now_ms(struct vk_app* v) {
  * fresh-pool-per-resize. */
 static void vk_configure(struct app* a) {
     struct vk_app* v = (struct vk_app*)a;
-    if (v->swapchain
-        && ((uint32_t)a->width != v->extent.width
-            || (uint32_t)a->height != v->extent.height)) {
+    if (v->swapchain &&
+        ((uint32_t)a->width != v->extent.width || (uint32_t)a->height != v->extent.height)) {
         v->resized = 1;
     }
 }
@@ -158,9 +156,8 @@ static void pick_device(struct vk_app* v) {
         uint32_t fn = 16;
         vkGetPhysicalDeviceQueueFamilyProperties(devs[d], &fn, fams);
         for (uint32_t f = 0; f < fn; f++) {
-            if ((fams[f].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-                && vkGetPhysicalDeviceWaylandPresentationSupportKHR(devs[d], f,
-                                                                    v->app.display)) {
+            if ((fams[f].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+                vkGetPhysicalDeviceWaylandPresentationSupportKHR(devs[d], f, v->app.display)) {
                 v->phys = devs[d];
                 v->queue_family = f;
 
@@ -215,10 +212,18 @@ static void create_swapchain(struct vk_app* v) {
     } else {
         v->extent.width = (uint32_t)a->width;
         v->extent.height = (uint32_t)a->height;
-        if (v->extent.width < caps.minImageExtent.width) { v->extent.width = caps.minImageExtent.width; }
-        if (v->extent.height < caps.minImageExtent.height) { v->extent.height = caps.minImageExtent.height; }
-        if (v->extent.width > caps.maxImageExtent.width) { v->extent.width = caps.maxImageExtent.width; }
-        if (v->extent.height > caps.maxImageExtent.height) { v->extent.height = caps.maxImageExtent.height; }
+        if (v->extent.width < caps.minImageExtent.width) {
+            v->extent.width = caps.minImageExtent.width;
+        }
+        if (v->extent.height < caps.minImageExtent.height) {
+            v->extent.height = caps.minImageExtent.height;
+        }
+        if (v->extent.width > caps.maxImageExtent.width) {
+            v->extent.width = caps.maxImageExtent.width;
+        }
+        if (v->extent.height > caps.maxImageExtent.height) {
+            v->extent.height = caps.maxImageExtent.height;
+        }
     }
 
     /* Honeykrisp advertises 32+ format/colorspace combos, so this
@@ -227,17 +232,16 @@ static void create_swapchain(struct vk_app* v) {
     VkSurfaceFormatKHR formats[32];
     uint32_t fn = 32;
     VkResult fr = vkGetPhysicalDeviceSurfaceFormatsKHR(v->phys, v->vk_surface, &fn, formats);
-    if (fr != VK_SUCCESS && fr != VK_INCOMPLETE) { die("vkGetPhysicalDeviceSurfaceFormatsKHR failed"); }
+    if (fr != VK_SUCCESS && fr != VK_INCOMPLETE) {
+        die("vkGetPhysicalDeviceSurfaceFormatsKHR failed");
+    }
     VkSurfaceFormatKHR pick = formats[0];
     for (uint32_t i = 0; i < fn; i++) {
         if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM) { pick = formats[i]; }
     }
     v->format = pick.format;
 
-    /* min+1: with the bare minimum, acquire can block on the loan the
-     * compositor still holds -- double-vs-triple as a number you pick.
-     * FIFO = vsync, guaranteed to exist. */
-    uint32_t count = caps.minImageCount + 1;
+    uint32_t count = caps.minImageCount;
     if (caps.maxImageCount > 0 && count > caps.maxImageCount) { count = caps.maxImageCount; }
 
     VkSwapchainKHR old = v->swapchain;
@@ -366,8 +370,8 @@ static void create_pipeline(struct vk_app* v) {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
     VkPipelineColorBlendAttachmentState blend_att = {
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
-                          | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT};
     VkPipelineColorBlendStateCreateInfo blend = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         .attachmentCount = 1,
@@ -402,8 +406,7 @@ static void create_pipeline(struct vk_app* v) {
         .pDynamicState = &dyn,
         .layout = v->pipeline_layout,
     };
-    VK_CHECK(vkCreateGraphicsPipelines(v->device, VK_NULL_HANDLE, 1, &pci, NULL,
-                                       &v->pipeline));
+    VK_CHECK(vkCreateGraphicsPipelines(v->device, VK_NULL_HANDLE, 1, &pci, NULL, &v->pipeline));
 
     vkDestroyShaderModule(v->device, vs, NULL);
     vkDestroyShaderModule(v->device, fs, NULL);
@@ -450,8 +453,12 @@ static void draw_frame(struct vk_app* v) {
     VK_CHECK(vkWaitForFences(v->device, 1, &v->in_flight[f], VK_TRUE, UINT64_MAX));
 
     uint32_t img;
-    VkResult r = vkAcquireNextImageKHR(v->device, v->swapchain, UINT64_MAX,
-                                       v->image_avail[f], VK_NULL_HANDLE, &img);
+    VkResult r = vkAcquireNextImageKHR(v->device,
+                                       v->swapchain,
+                                       UINT64_MAX,
+                                       v->image_avail[f],
+                                       VK_NULL_HANDLE,
+                                       &img);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || v->resized) {
         recreate_swapchain(v);
         return; /* image_avail[f] unsignaled -- safe to reuse next call */
@@ -461,9 +468,8 @@ static void draw_frame(struct vk_app* v) {
     VK_CHECK(vkResetFences(v->device, 1, &v->in_flight[f]));
 
     VkCommandBuffer cmd = v->cmd[f];
-    VkCommandBufferBeginInfo bi = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                   .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
 
     /* Dynamic rendering means WE manage image layouts. */
@@ -478,9 +484,16 @@ static void draw_frame(struct vk_app* v) {
         .image = v->images[img],
         .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
     };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0,
-                         NULL, 1, &to_color);
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         0,
+                         0,
+                         NULL,
+                         0,
+                         NULL,
+                         1,
+                         &to_color);
 
     VkRenderingAttachmentInfo color_att = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
@@ -498,8 +511,7 @@ static void draw_frame(struct vk_app* v) {
     };
     vkCmdBeginRendering(cmd, &ri);
 
-    VkViewport viewport = {0, 0, (float)v->extent.width, (float)v->extent.height,
-                           0.0f, 1.0f};
+    VkViewport viewport = {0, 0, (float)v->extent.width, (float)v->extent.height, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, v->extent};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &scissor);
@@ -510,8 +522,7 @@ static void draw_frame(struct vk_app* v) {
         .cursor = {(float)a->ptr_x, (float)a->ptr_y},
         .time_ms = (float)app_anim_time(a),
     };
-    vkCmdPushConstants(cmd, v->pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof(pc), &pc);
+    vkCmdPushConstants(cmd, v->pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
     vkCmdDraw(cmd, 3, 1, 0, 0); /* the fullscreen triangle */
 
     vkCmdEndRendering(cmd);
@@ -521,8 +532,15 @@ static void draw_frame(struct vk_app* v) {
     to_present.dstAccessMask = 0;
     to_present.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1,
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                         0,
+                         0,
+                         NULL,
+                         0,
+                         NULL,
+                         1,
                          &to_present);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
@@ -564,8 +582,7 @@ int main(void) {
     struct vk_app v = {0};
     clock_gettime(CLOCK_MONOTONIC, &v.t0);
 
-    if (app_init(&v.app, &vk_backend, "hello wayland (Vulkan)", "hello-wayland-vulkan")
-        < 0) {
+    if (app_init(&v.app, &vk_backend, "hello wayland (Vulkan)", "hello-wayland-vulkan") < 0) {
         return 1;
     }
 
