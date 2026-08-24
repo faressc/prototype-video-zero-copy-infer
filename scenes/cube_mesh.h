@@ -79,7 +79,7 @@ static inline mat4 cube_model_matrix(const struct app* a) {
 static inline mat4 cube_view_proj(int w, int h, int y_down, int z_zero_to_one, double zoom) {
     float aspect = (float)w / (float)(h > 0 ? h : 1);
     mat4 proj =
-        mat4_perspective(50.0f * MAT4_PI / 180.0f, aspect, 0.1f, 100.0f, y_down, z_zero_to_one);
+        mat4_perspective(80.0f * MAT4_PI / 180.0f, aspect, 0.1f, 100.0f, y_down, z_zero_to_one);
     mat4 view = mat4_translate(0.0f, 0.0f, -4.5f / (float)zoom);
     return mat4_mul(proj, view);
 }
