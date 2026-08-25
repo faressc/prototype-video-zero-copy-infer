@@ -58,7 +58,7 @@ struct cam_scene {
     GLuint tmp_tex[2], tmp_fbo[2]; /* the chain's scratch, camera-sized */
 
     GLuint cube_program, vbo, ibo; /* the cube as the last pass */
-    GLint c_pos, c_normal, c_uv, c_mvp, c_model;
+    GLint c_pos, c_normal, c_uv, c_mvp, c_model, c_uv_scale;
     struct pass_uniforms cu;
 };
 
@@ -124,15 +124,18 @@ static const char* cube_vert_src =
     "attribute vec2 a_uv;\n"
     "uniform mat4 u_mvp;\n"
     "uniform mat4 u_model;\n"
+    "uniform vec2 u_uv_scale;\n" /* aspect: the face is square, the camera is not */
     "varying vec3 v_normal;\n"
     "varying vec2 v_uv;\n"
     "void main() {\n"
     "    v_normal = mat3(u_model) * a_normal;\n"
-    "    v_uv = a_uv;\n"
+    "    v_uv = 0.5 + (a_uv - 0.5) * u_uv_scale;\n"
     "    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
     "}\n";
 
-/* the cube's fragment shader = the same pass body with a lit main */
+/* the cube's fragment shader = the same pass body with a lit main. v_uv
+ * arrives already aspect-corrected, so the effects (and their texel
+ * offsets) run in camera-texture space as in the fullscreen pass. */
 static const char* cube_frag_tail =
     "varying vec3 v_normal;\n"
     "void main() {\n"
@@ -219,7 +222,20 @@ static void build_programs(struct cam_scene* s) {
     s->c_uv = glGetAttribLocation(s->cube_program, "a_uv");
     s->c_mvp = glGetUniformLocation(s->cube_program, "u_mvp");
     s->c_model = glGetUniformLocation(s->cube_program, "u_model");
+    s->c_uv_scale = glGetUniformLocation(s->cube_program, "u_uv_scale");
     lookup_pass_uniforms(s->cube_program, &s->cu);
+
+    /* Center-crop the camera image to the square face ("cover"): use the
+     * full extent of the short axis, a centered window of the long one.
+     * Set once; the camera size is fixed. For letterboxing ("contain",
+     * bars on the face) swap the two branches. */
+    const float aspect = (float)s->cw / (float)s->ch;
+    glUseProgram(s->cube_program);
+    if (aspect > 1.0f) {
+        glUniform2f(s->c_uv_scale, 1.0f / aspect, 1.0f);
+    } else {
+        glUniform2f(s->c_uv_scale, 1.0f, aspect);
+    }
 
     glGenBuffers(1, &s->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, s->vbo);

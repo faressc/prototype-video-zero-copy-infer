@@ -6,9 +6,13 @@
  * Lighting is computed HERE, in model space: the CPU pushes the light
  * direction already rotated by the inverse model rotation, so
  * normal . light needs no model matrix -- that keeps the vertex push
- * constants at 80 bytes and leaves room for the fragment stage's
+ * constants at 96 bytes and leaves room for the fragment stage's
  * effect parameters within the 128-byte minimum. Exact for this cube:
- * its normals are constant per face, so per-vertex = per-pixel. */
+ * its normals are constant per face, so per-vertex = per-pixel.
+ *
+ * uv_scale center-crops the (non-square) camera image onto the square
+ * face: the remap is linear, so doing it here and interpolating is the
+ * same as doing it per fragment. */
 #version 450
 
 layout(location = 0) in vec3 a_pos;
@@ -22,10 +26,11 @@ layout(location = 1) out vec2 v_uv;
 layout(push_constant) uniform PC {
     mat4 mvp;
     vec4 light_model; /* xyz: light direction in model space */
+    vec2 uv_scale;    /* (1/aspect, 1) for a landscape camera */
 } pc;
 
 void main() {
     v_diffuse = max(dot(a_normal, pc.light_model.xyz), 0.0);
-    v_uv = a_uv;
+    v_uv = 0.5 + (a_uv - 0.5) * pc.uv_scale;
     gl_Position = pc.mvp * vec4(a_pos, 1.0);
 }

@@ -181,8 +181,15 @@ static void draw_cube(struct cam_scene* s,
     mat4 model = cube_model_matrix(a);
     mat4 mvp = mat4_mul(cube_view_proj(t->width, t->height, 1, 1, a->zoom), model);
 
+    /* Center-crop the camera image to the square face ("cover"): full
+     * extent of the short axis, a centered window of the long one.
+     * Linear, so applied per vertex; the rasterizer interpolates. */
+    const float aspect = (float)s->cw / (float)s->ch;
+    const float su = aspect > 1.0f ? 1.0f / aspect : 1.0f;
+    const float sv = aspect > 1.0f ? 1.0f : aspect;
+
     /* vertex stage: position through mvp, normal through the rotation,
-     * uv passed through */
+     * uv aspect-corrected */
     struct raster_vertex verts[24];
     for (int i = 0; i < 24; i++) {
         const struct cube_vertex* in = &cube_vertices[i];
@@ -194,8 +201,8 @@ static void draw_cube(struct cam_scene* s,
                                model.m[1 * 4 + r] * in->normal[1] +
                                model.m[2 * 4 + r] * in->normal[2];
         }
-        verts[i].attr[3] = in->uv[0];
-        verts[i].attr[4] = in->uv[1];
+        verts[i].attr[3] = 0.5f + (in->uv[0] - 0.5f) * su;
+        verts[i].attr[4] = 0.5f + (in->uv[1] - 0.5f) * sv;
     }
 
     struct raster_target rt = {t->pixels, t->width, t->height, t->stride_px, t->depth};

@@ -53,13 +53,15 @@
 /* The cube pipeline's push constants: the vertex stage gets the mvp
  * and the light direction pre-rotated into MODEL space (80 bytes),
  * the fragment stage gets the same pass parameters as the flat
- * pipeline (struct cam_push, at offset 80). 100 bytes total: the 128
+ * pipeline (struct cam_push, at offset 96). 116 bytes total: the 128
  * guaranteed minimum is why the model matrix is not pushed too --
  * lighting a flat-shaded cube needs only normal . light, which works
  * in any space as long as both are in the same one. */
 struct cube_push { /* must match cube_cam.vert */
     mat4 mvp;
     float light_model[4];
+    float uv_scale[2]; /* aspect: center-crop the camera onto the square face */
+    float pad[2];
 };
 enum { CUBE_FRAG_PUSH_OFFSET = sizeof(struct cube_push) };
 
@@ -827,6 +829,12 @@ static void draw_cube(struct vk_presenter* p,
                               model.m[i * 4 + 2] * light[2];
     }
     push.light_model[3] = 0.0f;
+    /* "cover": full extent of the camera's short axis, a centered
+     * window of the long one */
+    const float aspect = (float)s->cw / (float)s->ch;
+    push.uv_scale[0] = aspect > 1.0f ? 1.0f / aspect : 1.0f;
+    push.uv_scale[1] = aspect > 1.0f ? 1.0f : aspect;
+    push.pad[0] = push.pad[1] = 0.0f;
     vkCmdPushConstants(fr->cmd, s->cube_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
     vkCmdPushConstants(fr->cmd,
                        s->cube_layout,

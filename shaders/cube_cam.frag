@@ -1,6 +1,6 @@
 /* cube_cam.frag -- the camera as the cube's surface, as the LAST pass
  * of the effect chain: same bindings and pass parameters as cam.frag
- * (the push constants sit after the vertex stage's, at offset 80),
+ * (the push constants sit after the vertex stage's, at offset 96),
  * sampled at the mesh uv, then lit. */
 #version 450
 
@@ -13,7 +13,7 @@ layout(set = 0, binding = 1) uniform sampler2D u_tmp0;
 layout(set = 0, binding = 2) uniform sampler2D u_tmp1;
 
 layout(push_constant) uniform PC {
-    layout(offset = 80) vec2 texel;
+    layout(offset = 96) vec2 texel;
     float time;
     int effect;
     int src;
