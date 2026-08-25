@@ -79,6 +79,38 @@
             "program": "${workspaceRoot}/build/cube_vulkan",
             "args": [],
             "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "Launch cam shm",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cam_shm",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "Launch cam gles-dmabuf",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cam_gles_dmabuf",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "Launch cam gles-eglsurface",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cam_gles_eglsurface",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "Launch cam vulkan",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/cam_vulkan",
+            "args": [],
+            "cwd": "${workspaceRoot}"
         }
     ]
 }

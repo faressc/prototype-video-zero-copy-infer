@@ -97,11 +97,16 @@ static void cube_init(struct gles_presenter* p, void* user) {
     c->u_mvp = glGetUniformLocation(c->program, "u_mvp");
     c->u_model = glGetUniformLocation(c->program, "u_model");
 
-    /* The mesh moves to GPU memory once. GLES2's client-side arrays
-     * (the gradient's verts[] pointer) would re-upload it every draw. */
+    /* The mesh moves to GPU memory once (gen / bind / allocate+copy).
+     * GLES2's client-side arrays would re-upload it every draw. */
     glGenBuffers(1, &c->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, c->vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);
+
+    /* Indices are not an attribute: they feed primitive assembly, not
+     * the vertex shader, and need no layout call -- type and offset are
+     * glDrawElements arguments. 36 indices into 24 vertices; only
+     * constraint: every index < 24. */
     glGenBuffers(1, &c->ibo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->ibo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_indices), cube_indices, GL_STATIC_DRAW);
@@ -129,10 +134,19 @@ static void cube_draw(struct gles_presenter* p, const struct gles_target* t, voi
     mat4 model = cube_model_matrix(a);
     mat4 mvp = mat4_mul(cube_view_proj(t->width, t->height, p->y_down, 0, a->zoom), model);
 
+    /* Uniforms: one value per draw, the per-frame input. Program state
+     * -- glUniform* writes into the program in use, so glUseProgram
+     * first. Locations were resolved in init; GL_FALSE = no transpose. */
     glUseProgram(c->program);
     glUniformMatrix4fv(c->u_mvp, 1, GL_FALSE, mvp.m);
     glUniformMatrix4fv(c->u_model, 1, GL_FALSE, model.m);
 
+    /* Attribute table: offsetof/sizeof for the vertex-fetch unit. Each
+     * call SNAPSHOTS the buffer bound to GL_ARRAY_BUFFER, so the vbo is
+     * bound for these calls, not for the draw. Enable = "per-vertex
+     * from the array" instead of one constant. uv is not described:
+     * padding. The table is context state shared by every mesh, so a
+     * draw re-sets its own before drawing. */
     glBindBuffer(GL_ARRAY_BUFFER, c->vbo);
     const GLsizei stride = sizeof(struct cube_vertex);
     glEnableVertexAttribArray((GLuint)c->a_pos);
@@ -157,7 +171,12 @@ static void cube_draw(struct gles_presenter* p, const struct gles_target* t, voi
                           stride,
                           (const void*)offsetof(struct cube_vertex, color));
 
+    /* Unlike GL_ARRAY_BUFFER this binding is read AT DRAW time: the
+     * draw's trailing 0 is an offset into it. */
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, c->ibo);
+
+    /* The whole software rasterizer in one call. Returns immediately;
+     * the presenter fences before handing the buffer to the compositor. */
     glDrawElements(GL_TRIANGLES, CUBE_INDEX_COUNT, GL_UNSIGNED_SHORT, 0);
 }
 

@@ -30,6 +30,10 @@
 
 enum {
     VK_PRESENT_DEPTH = 1 << 0, /* create a depth image; frames carry a depth view */
+    /* enable what importing camera dmabufs needs (external memory fd +
+     * dma_buf, DRM format modifiers, foreign queue family, sampler
+     * YCbCr conversion) when the driver has it; see dmabuf_import */
+    VK_PRESENT_CAMERA_IMPORT = 1 << 1,
 };
 
 enum { VK_PRESENT_LANES = 2 }; /* MAX_FRAMES_IN_FLIGHT */
@@ -44,6 +48,7 @@ struct vk_frame {
                            * DEPTH_STENCIL_ATTACHMENT_OPTIMAL, contents undefined */
     uint32_t image_index; /* swapchain image, for per-image scene resources */
     uint32_t lane;        /* frame in flight, for per-lane scene resources */
+    uint64_t serial;      /* this frame's number; vk_present_serial_done() later */
     VkExtent2D extent;
 };
 
@@ -76,6 +81,7 @@ struct vk_presenter {
     uint32_t queue_family;
     VkDevice device;
     VkQueue queue;
+    int dmabuf_import; /* VK_PRESENT_CAMERA_IMPORT requested and fully available */
 
     VkSwapchainKHR swapchain;
     VkFormat color_format;
@@ -98,6 +104,8 @@ struct vk_presenter {
     VkSemaphore image_avail[VK_PRESENT_LANES]; /* per lane */
     VkFence in_flight[VK_PRESENT_LANES];       /* per lane */
     uint32_t lane;
+    uint64_t frame_serial;                  /* counts submitted frames */
+    uint64_t lane_serial[VK_PRESENT_LANES]; /* which frame each lane carries */
 
     struct timespec t0;
 };
@@ -124,6 +132,11 @@ uint32_t vk_present_find_memory_type(const struct vk_presenter* p,
                                      uint32_t type_bits,
                                      VkMemoryPropertyFlags required);
 VkShaderModule vk_present_load_shader(const struct vk_presenter* p, const char* path);
+
+/* Has the GPU finished the frame with this serial (from vk_frame)?
+ * The scene's way to know a resource read by that frame -- a camera
+ * buffer -- may be handed back to its owner. */
+int vk_present_serial_done(const struct vk_presenter* p, uint64_t serial);
 
 #define VK_CHECK(expr)                                                  \
     do {                                                                \

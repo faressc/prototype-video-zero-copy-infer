@@ -115,6 +115,17 @@ struct app {
     double zoom;
     double zoom_at_pinch_begin;
 
+    /* a second fd in the event loop (the camera): app_run polls it next
+     * to the display fd and calls on_aux_fd when it is readable. -1 =
+     * none. Loop-owning backends call on_aux_fd themselves. */
+    int aux_fd;
+    void (*on_aux_fd)(struct app* a);
+
+    /* effects, as a BITMASK: key N toggles bit N-1, E clears all --
+     * active effects layer. A scene sets effect_count (bits in use). */
+    int effect, effect_count;
+    int mode; /* C toggles a scene-defined mode (the camera scenes: on the cube) */
+
     int running;
 };
 

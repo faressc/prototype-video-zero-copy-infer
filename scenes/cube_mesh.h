@@ -21,15 +21,17 @@ struct cube_vertex {
     float pos[3];
     float normal[3];
     float color[3];
+    float uv[2]; /* texture coordinates: (0,0) top-left of the face, as
+                  * seen from outside -- camera row 0 lands at the top */
 };
 
-/* One face = 4 corners, listed CCW from outside. */
+/* One face = 4 corners, listed CCW from outside: bottom-left,
+ * bottom-right, top-right, top-left -- so the uv's are fixed. */
 #define CUBE_FACE(nx, ny, nz, r, g, b, x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3) \
-    {{x0, y0, z0}, {nx, ny, nz}, {r, g, b}}, {{x1, y1, z1}, {nx, ny, nz}, {r, g, b}},  \
-        {{x2, y2, z2}, {nx, ny, nz}, {r, g, b}}, {                                     \
-        {x3, y3, z3}, {nx, ny, nz}, {                                                  \
-            r, g, b                                                                    \
-        }                                                                              \
+    {{x0, y0, z0}, {nx, ny, nz}, {r, g, b}, {0, 1}},                                   \
+        {{x1, y1, z1}, {nx, ny, nz}, {r, g, b}, {1, 1}},                               \
+        {{x2, y2, z2}, {nx, ny, nz}, {r, g, b}, {1, 0}}, {                             \
+        {x3, y3, z3}, {nx, ny, nz}, {r, g, b}, {0, 0}                                  \
     }
 
 static const struct cube_vertex cube_vertices[24] = {

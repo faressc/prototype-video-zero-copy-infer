@@ -7,8 +7,10 @@
 
 #include "common.h"
 
+#include <errno.h>
 #include <linux/input-event-codes.h> /* BTN_LEFT */
 #include <math.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,7 +117,16 @@ static void on_keyboard_key(void* data,
         case XKB_KEY_Escape:
         case XKB_KEY_q: a->running = 0; break;
         case XKB_KEY_space: a->paused = !a->paused; break;
-        default: break;
+        case XKB_KEY_e:
+        case XKB_KEY_E: a->effect = 0; break; /* all off */
+        case XKB_KEY_c:
+        case XKB_KEY_C: a->mode = !a->mode; break;
+        default:
+            if (sym >= XKB_KEY_1 && sym <= XKB_KEY_9) {
+                int n = (int)(sym - XKB_KEY_1);
+                if (n < a->effect_count) { a->effect ^= 1 << n; } /* toggle: effects layer */
+            }
+            break;
     }
 }
 
@@ -529,6 +540,7 @@ int app_init(struct app* a,
     a->running = 1;
     a->speed = 1.0;
     a->zoom = 1.0;
+    a->aux_fd = -1;
     a->pending_w = APP_DEFAULT_WIDTH;
     a->pending_h = APP_DEFAULT_HEIGHT;
 
@@ -567,8 +579,51 @@ int app_init(struct app* a,
     return 0;
 }
 
+/* The event loop, multi-fd edition. wl_display_dispatch() hides a loop
+ * that can only wait on the Wayland socket; to also wait on the camera
+ * fd, poll() has to be ours -- and then libwayland's read must be
+ * split into its documented three steps so no thread/queue can race
+ * the socket read (§11): prepare_read (claim the socket; fails if the
+ * queue still has undispatched events -- drain first), poll, then
+ * read_events (into every queue) or cancel_read. Mesa's queues on the
+ * same socket are why this dance exists: whoever reads delivers to
+ * ALL queues. */
 void app_run(struct app* a) {
-    while (a->running && wl_display_dispatch(a->display) != -1) {}
+    struct pollfd fds[2] = {
+        {.fd = wl_display_get_fd(a->display), .events = POLLIN},
+        {.fd = -1, .events = POLLIN},
+    };
+
+    while (a->running) {
+        while (wl_display_prepare_read(a->display) != 0) {
+            if (wl_display_dispatch_pending(a->display) == -1) { return; }
+        }
+        wl_display_flush(a->display);
+
+        /* re-read every turn: a scene may register its fd from inside
+         * a configure callback (the EGLSurface presenter's init) */
+        const int nfds = a->aux_fd >= 0 ? 2 : 1;
+        fds[1].fd = a->aux_fd;
+        fds[0].revents = 0;
+        fds[1].revents = 0;
+        if (poll(fds, (nfds_t)nfds, -1) < 0) {
+            wl_display_cancel_read(a->display);
+            if (errno == EINTR) { continue; }
+            return;
+        }
+        if (fds[0].revents & (POLLERR | POLLHUP)) {
+            wl_display_cancel_read(a->display);
+            return;
+        }
+        if (fds[0].revents & POLLIN) {
+            if (wl_display_read_events(a->display) == -1) { return; }
+        } else {
+            wl_display_cancel_read(a->display);
+        }
+        if (wl_display_dispatch_pending(a->display) == -1) { return; }
+
+        if (nfds == 2 && (fds[1].revents & POLLIN) && a->on_aux_fd) { a->on_aux_fd(a); }
+    }
 }
 
 void app_finish(struct app* a) {

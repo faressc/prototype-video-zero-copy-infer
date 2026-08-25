@@ -101,13 +101,65 @@ static void create_device(struct vk_presenter* p) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
         .dynamicRendering = VK_TRUE,
     };
-    const char* exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const char* exts[8] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    uint32_t ext_count = 1;
+
+    /* Optional extensions are negotiated like Wayland globals: ask
+     * what the driver offers, enable what we need if present, remember
+     * the answer. Nothing is usable unless enabled here. */
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES,
+    };
+    if (p->flags & VK_PRESENT_CAMERA_IMPORT) {
+        static const char* const wanted[] = {
+            VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,        /* import memory from an fd */
+            VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,   /* ...specifically a dmabuf */
+            VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME, /* describe its layout */
+            VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,      /* ownership: "someone else" */
+        };
+        uint32_t n = 0;
+        vkEnumerateDeviceExtensionProperties(p->phys, NULL, &n, NULL);
+        VkExtensionProperties* props = malloc(n * sizeof(*props));
+        vkEnumerateDeviceExtensionProperties(p->phys, NULL, &n, props);
+        int all = 1;
+        for (size_t w = 0; w < sizeof(wanted) / sizeof(wanted[0]); w++) {
+            int found = 0;
+            for (uint32_t i = 0; i < n; i++) {
+                if (strcmp(props[i].extensionName, wanted[w]) == 0) { found = 1; }
+            }
+            if (found) {
+                exts[ext_count++] = wanted[w];
+            } else {
+                fprintf(stderr, "vk_present: missing %s\n", wanted[w]);
+                all = 0;
+            }
+        }
+        free(props);
+
+        VkPhysicalDeviceSamplerYcbcrConversionFeatures have = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES};
+        VkPhysicalDeviceFeatures2 f2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                        .pNext = &have};
+        vkGetPhysicalDeviceFeatures2(p->phys, &f2);
+        if (have.samplerYcbcrConversion) {
+            ycbcr.samplerYcbcrConversion = VK_TRUE;
+            dynren.pNext = &ycbcr; /* chain a second feature struct */
+        } else {
+            fprintf(stderr, "vk_present: no samplerYcbcrConversion\n");
+            all = 0;
+        }
+        p->dmabuf_import = all;
+        fprintf(stderr,
+                "vk_present: camera dmabuf import %s\n",
+                all ? "available" : "unavailable -- CPU staging fallback");
+    }
+
     VkDeviceCreateInfo ci = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &dynren,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &qci,
-        .enabledExtensionCount = 1,
+        .enabledExtensionCount = ext_count,
         .ppEnabledExtensionNames = exts,
     };
     VK_CHECK(vkCreateDevice(p->phys, &ci, NULL, &p->device));
@@ -453,6 +505,8 @@ static void draw_frame(struct vk_presenter* p) {
         vkCmdPipelineBarrier(cmd, depth_stages, depth_stages, 0, 0, NULL, 0, NULL, 1, &to_depth);
     }
 
+    p->frame_serial++;
+    p->lane_serial[f] = p->frame_serial;
     struct vk_frame frame = {
         .cmd = cmd,
         .color_image = p->images[img],
@@ -460,6 +514,7 @@ static void draw_frame(struct vk_presenter* p) {
         .depth = p->depth_view,
         .image_index = img,
         .lane = f,
+        .serial = p->frame_serial,
         .extent = p->extent,
     };
     p->scene->record(p, &frame, p->user);
@@ -555,9 +610,25 @@ void vk_present_run(struct vk_presenter* p) {
     while (p->app.running) {
         if (wl_display_dispatch_pending(p->app.display) == -1) { break; }
         wl_display_flush(p->app.display);
+        /* no poll() here: the loop is paced by present, and the aux
+         * source (camera) is drained non-blocking once per frame */
+        if (p->app.on_aux_fd) { p->app.on_aux_fd(&p->app); }
         app_advance_clock(&p->app, now_ms(p));
         draw_frame(p);
     }
+}
+
+int vk_present_serial_done(const struct vk_presenter* p, uint64_t serial) {
+    if (serial == 0 || serial > p->frame_serial) { return 0; }
+    for (int i = 0; i < VK_PRESENT_LANES; i++) {
+        if (p->lane_serial[i] == serial) {
+            /* the lane still carries this frame: ask its fence */
+            return vkGetFenceStatus(p->device, p->in_flight[i]) == VK_SUCCESS;
+        }
+    }
+    /* the lane was reused, which only happens after waiting its fence:
+     * the frame is complete */
+    return 1;
 }
 
 void vk_present_fini(struct vk_presenter* p) {

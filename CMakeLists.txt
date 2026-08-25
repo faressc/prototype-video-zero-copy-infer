@@ -117,6 +117,9 @@ if(GLSLC OR GLSLANG)
     # custom command per GLSL file; the .spv paths land in <out-var> so
     # they can be listed as executable sources (Ninja then rebuilds them
     # when the GLSL changes, exactly like a .c file).
+    # shared GLSL pulled in via #include (glslc resolves it relative to
+    # the including file); listed as a dependency of every shader
+    set(SHADER_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cam_effects.glsl)
     function(add_spirv_shaders OUT_VAR)
         set(SPVS)
         foreach(SHADER ${ARGN})
@@ -125,12 +128,12 @@ if(GLSLC OR GLSLANG)
                 add_custom_command(
                     OUTPUT ${SPV}
                     COMMAND ${GLSLC} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} -o ${SPV}
-                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER})
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${SHADER_INCLUDES})
             else()
                 add_custom_command(
                     OUTPUT ${SPV}
                     COMMAND ${GLSLANG} -V ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} -o ${SPV}
-                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER})
+                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${SHADER_INCLUDES})
             endif()
             list(APPEND SPVS ${SPV})
         endforeach()
@@ -152,6 +155,27 @@ endif()
 #    library (extracted from hello/) and a scene that plugs into it via a
 #    four-function vtable.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 6. Stage three (README §18): the camera. A raw V4L2 capture device
+#    exporting its buffers as dmabufs, plus the pacing/lifetime helper;
+#    scenes import the buffers zero-copy (GLES, Vulkan) or map them (CPU).
+# ---------------------------------------------------------------------------
+add_library(camera STATIC camera/v4l2_camera.c camera/v4l2_camera.h
+                          camera/cam_stream.c camera/cam_stream.h)
+target_include_directories(camera PUBLIC camera)
+
+# embed_glsl(<header> <glsl-file> <symbol>): the GLES scenes compile
+# shaders from source strings at runtime, so the shared effect file is
+# turned into a C string at configure time (re-run when it changes).
+function(embed_glsl OUT_HDR INPUT SYMBOL)
+    file(READ ${INPUT} HEX_CONTENT HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," HEX_CONTENT ${HEX_CONTENT})
+    file(WRITE ${OUT_HDR} "/* generated from ${INPUT} */\nstatic const char ${SYMBOL}[] = {${HEX_CONTENT}0x00};\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${INPUT})
+endfunction()
+embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/cam_effects_glsl.h
+           ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cam_effects.glsl cam_effects_glsl)
+
 # the CPU presenter + the cube through a software rasterizer: every
 # pipeline stage the GPU scenes declare in a struct, as a loop
 add_library(shm_present STATIC present/shm_present.c present/shm_present.h)
@@ -185,4 +209,30 @@ if(GLSLC OR GLSLANG)
     add_executable(cube_vulkan scenes/scene_cube_vk.c scenes/cube_mesh.h scenes/mat4.h ${CUBE_SPV})
     target_compile_definitions(cube_vulkan PRIVATE SHADER_DIR="${SHADER_OUT_DIR}")
     target_link_libraries(cube_vulkan PRIVATE vk_present)
+endif()
+
+# ---------------------------------------------------------------------------
+# 7. The camera scenes: the same effect chain on the CPU, on GLES (zero-copy
+#    via EGLImage + samplerExternalOES), and on Vulkan (zero-copy via
+#    external memory + YCbCr sampler, CPU staging as the fallback).
+# ---------------------------------------------------------------------------
+add_executable(cam_shm scenes/scene_cam_shm.c scenes/raster.h scenes/cube_mesh.h scenes/mat4.h)
+target_link_libraries(cam_shm PRIVATE shm_present camera m)
+
+add_executable(cam_gles_dmabuf scenes/scene_cam_gles.c scenes/cube_mesh.h scenes/mat4.h)
+target_compile_definitions(cam_gles_dmabuf PRIVATE CAM_GLES_MODE=GLES_MODE_DMABUF)
+target_include_directories(cam_gles_dmabuf PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cam_gles_dmabuf PRIVATE gles_present camera)
+
+add_executable(cam_gles_eglsurface scenes/scene_cam_gles.c scenes/cube_mesh.h scenes/mat4.h)
+target_compile_definitions(cam_gles_eglsurface PRIVATE CAM_GLES_MODE=GLES_MODE_EGLSURFACE)
+target_include_directories(cam_gles_eglsurface PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cam_gles_eglsurface PRIVATE gles_present camera)
+
+if(GLSLC OR GLSLANG)
+    pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm) # drm_fourcc.h for the modifier
+    add_spirv_shaders(CAM_SPV cam.vert cam.frag cube_cam.vert cube_cam.frag)
+    add_executable(cam_vulkan scenes/scene_cam_vk.c scenes/cube_mesh.h scenes/mat4.h ${CAM_SPV})
+    target_compile_definitions(cam_vulkan PRIVATE SHADER_DIR="${SHADER_OUT_DIR}")
+    target_link_libraries(cam_vulkan PRIVATE vk_present camera PkgConfig::LIBDRM)
 endif()
