@@ -1,0 +1,13 @@
+# This is a C codebase in snake_case; the C++-oriented naming rules of the
+# user-global .clang-tidy do not apply here. Keep the bug-finding checks.
+Checks: >
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-narrowing-conversions,
+  -bugprone-suspicious-memory-comparison,
+  misc-*,
+  -misc-include-cleaner,
+  -readability-identifier-naming

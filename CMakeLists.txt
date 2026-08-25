@@ -9,6 +9,9 @@ project(hello_wayland C)
 #              context + swapchain + sync + present loop, scene-agnostic (§17)
 #   scenes/    what gets drawn on top of a presenter (the cube)
 #   shaders/   GLSL for the Vulkan binaries, compiled to SPIR-V at build time
+#   camera/    stage three: V4L2 capture exporting dmabufs (§18)
+#   infer/     stage four: tensors across domains + ONNX Runtime (§20)
+#   models/    the ONNX models and the scripts that produced them
 
 # ---------------------------------------------------------------------------
 # 1. Find the libraries.
@@ -119,7 +122,8 @@ if(GLSLC OR GLSLANG)
     # when the GLSL changes, exactly like a .c file).
     # shared GLSL pulled in via #include (glslc resolves it relative to
     # the including file); listed as a dependency of every shader
-    set(SHADER_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cam_effects.glsl)
+    set(SHADER_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/cam_effects.glsl
+                        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_hash.glsl)
     function(add_spirv_shaders OUT_VAR)
         set(SPVS)
         foreach(SHADER ${ARGN})
@@ -230,10 +234,87 @@ target_compile_definitions(cam_gles_eglsurface PRIVATE CAM_GLES_MODE=GLES_MODE_E
 target_include_directories(cam_gles_eglsurface PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(cam_gles_eglsurface PRIVATE gles_present camera)
 
+pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm) # drm_fourcc.h for the modifier
 if(GLSLC OR GLSLANG)
-    pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm) # drm_fourcc.h for the modifier
     add_spirv_shaders(CAM_SPV cam.vert cam.frag cube_cam.vert cube_cam.frag)
     add_executable(cam_vulkan scenes/scene_cam_vk.c scenes/cube_mesh.h scenes/mat4.h ${CAM_SPV})
     target_compile_definitions(cam_vulkan PRIVATE SHADER_DIR="${SHADER_OUT_DIR}")
     target_link_libraries(cam_vulkan PRIVATE vk_present camera PkgConfig::LIBDRM)
+endif()
+
+# ---------------------------------------------------------------------------
+# 8. Stage four (README §20): inference. `infer` is a headless library --
+#    typeless tensors in four memory domains (CPU, GLES, Vulkan, WebGPU),
+#    a probed registry of conversion edges with explicit cost classes,
+#    and ONNX Runtime behind an engine seam. hello_inference sweeps the
+#    (source domain x execution provider) matrix. WE own Dawn (the
+#    anira v3 arrangement, doc section 4): DAWN_ROOT is a standalone
+#    monolithic-shared Dawn install (libwebgpu_dawn.so) on which the
+#    device is created; onnxruntime is built with
+#    onnxruntime_USE_EXTERNAL_DAWN=ON and onnxruntime_CUSTOM_DAWN_SRC_PATH=
+#    <the same Dawn source tree>, so it links only dawn_proc thunks and
+#    receives our proc table (option "dawnProcTable") at session creation.
+#    An ORT that ships its own libwebgpu_dawn.so is refused: two Dawns in
+#    one process cannot share a device.
+# ---------------------------------------------------------------------------
+set(ORT_ROOT "$ENV{HOME}/opt/onnxruntime-webgpu-extdawn" CACHE PATH
+    "onnxruntime install built with the in-tree WebGPU EP and USE_EXTERNAL_DAWN")
+set(DAWN_ROOT "$ENV{HOME}/opt/dawn" CACHE PATH
+    "standalone Dawn install (monolithic shared libwebgpu_dawn.so)")
+# find_* results are cache variables and would survive a change of
+# ORT_ROOT / DAWN_ROOT (pointing at the previous install); re-probe every
+# configure instead.
+foreach(v ORT_LIB ORT_INCLUDE DAWN_LIB ORT_OWN_DAWN)
+    unset(${v} CACHE)
+endforeach()
+find_library(ORT_LIB onnxruntime PATHS ${ORT_ROOT}/lib64 ${ORT_ROOT}/lib NO_DEFAULT_PATH)
+find_path(ORT_INCLUDE onnxruntime_c_api.h PATHS ${ORT_ROOT}/include/onnxruntime NO_DEFAULT_PATH)
+find_library(DAWN_LIB webgpu_dawn PATHS ${DAWN_ROOT}/lib64 ${DAWN_ROOT}/lib NO_DEFAULT_PATH)
+find_library(ORT_OWN_DAWN webgpu_dawn PATHS ${ORT_ROOT}/lib64 ${ORT_ROOT}/lib NO_DEFAULT_PATH)
+if(ORT_OWN_DAWN)
+    message(FATAL_ERROR "ORT_ROOT=${ORT_ROOT} ships its own libwebgpu_dawn.so; "
+                        "build onnxruntime with --use_external_dawn (see the comment above)")
+endif()
+set(DAWN_INCLUDE ${DAWN_ROOT}/include)
+
+if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
+    get_filename_component(ORT_LIBDIR ${ORT_LIB} DIRECTORY)
+    get_filename_component(DAWN_LIBDIR ${DAWN_LIB} DIRECTORY)
+    message(STATUS "infer: ORT ${ORT_LIB}; Dawn ${DAWN_LIB}")
+    add_spirv_shaders(INFER_SPV infer_gen.comp infer_gen_img.comp)
+    # runtime-compiled shaders (GLES, WGSL) as C strings
+    embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_hash_glsl.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_hash.glsl infer_hash_glsl)
+    embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_gen_es_glsl.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_gen_es.frag infer_gen_es_glsl)
+    embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_gen_wgsl.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_gen.wgsl infer_gen_wgsl)
+    embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_relayout_wgsl.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_relayout.wgsl infer_relayout_wgsl)
+
+    add_library(infer STATIC infer/infer.h infer/infer_util.h infer/infer_tensor.c
+                             infer/infer_ctx_gl.c infer/infer_ctx_vk.c infer/infer_ctx_wgpu.c
+                             infer/infer_edge.c infer/infer_engine_ort.c ${INFER_SPV})
+    target_include_directories(infer PUBLIC infer ${ORT_INCLUDE} ${DAWN_INCLUDE}
+                                     PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_compile_definitions(infer PRIVATE SHADER_DIR="${SHADER_OUT_DIR}" INFER_ORT_EXTERNAL_DAWN=1)
+    target_link_libraries(infer PUBLIC ${ORT_LIB} ${DAWN_LIB}
+                                       PkgConfig::GLES_DMABUF_STACK PkgConfig::VULKAN
+                                       PkgConfig::LIBDRM m ${CMAKE_DL_LIBS})
+
+    add_executable(hello_inference hello/hello_inference.c)
+    target_link_libraries(hello_inference PRIVATE infer)
+    set_target_properties(hello_inference PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+
+    enable_testing()
+    add_test(NAME infer_cpu_cpu
+             COMMAND hello_inference --src cpu --ep cpu --iters 3 --strict
+                     --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
+    add_test(NAME infer_all_synthetic
+             COMMAND hello_inference --all --iters 5 --strict
+                     --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
+    set_tests_properties(infer_all_synthetic PROPERTIES LABELS gpu)
+else()
+    message(WARNING "onnxruntime with WebGPU not found under ORT_ROOT=${ORT_ROOT} "
+                    "(or no GLSL compiler): skipping infer / hello_inference")
 endif()

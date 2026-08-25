@@ -1,0 +1,14 @@
+# ninja log v7
+9	131	1787686208441836251	shaders/infer_gen_img.comp.spv	4b6abe0242d29cf3
+9	131	1787686208441836251	/home/faressc/concepts/simple-wayland-window/build-release/shaders/infer_gen_img.comp.spv	4b6abe0242d29cf3
+5	155	1787686208464999026	shaders/infer_gen.comp.spv	a313c6d54d98e796
+5	155	1787686208464999026	/home/faressc/concepts/simple-wayland-window/build-release/shaders/infer_gen.comp.spv	a313c6d54d98e796
+156	439	1787686208474692012	CMakeFiles/infer.dir/infer/infer_edge.c.o	adf1e2f540940223
+157	453	1787686208475390389	CMakeFiles/infer.dir/infer/infer_engine_ort.c.o	4b6740fd2fc3868a
+157	503	1787686208475587098	CMakeFiles/hello_inference.dir/hello/hello_inference.c.o	36a9e0c94ab02380
+156	513	1787686208474563220	CMakeFiles/infer.dir/infer/infer_ctx_wgpu.c.o	613bb395515c489
+156	518	1787686208474415512	CMakeFiles/infer.dir/infer/infer_ctx_vk.c.o	5d8a8b4dabeb5700
+155	531	1787686208471999046	CMakeFiles/infer.dir/infer/infer_tensor.c.o	47be743d705df4e8
+156	555	1787686208472999049	CMakeFiles/infer.dir/infer/infer_ctx_gl.c.o	e36d7831104b1aed
+555	603	1787686208872253034	libinfer.a	4b987eeb86316823
+603	656	1787686208920000338	hello_inference	6f6ff3262423952c

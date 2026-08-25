@@ -1,0 +1,25 @@
+/* infer_gen.comp -- Vulkan: fill a tensor through the SSBO alias of the
+ * exportable memory. Rows are pitch_floats apart (the byte image's row
+ * pitch); the flat tensor index is y * img_w + x.
+ */
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "infer_hash.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform P {
+    uint img_w;
+    uint img_h;
+    uint pitch_floats;
+    uint seed;
+} p;
+
+layout(std430, set = 0, binding = 0) buffer Out { float v[]; } o;
+
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+    if (x >= p.img_w || y >= p.img_h) { return; }
+    o.v[y * p.pitch_floats + x] = infer_gen(y * p.img_w + x, p.seed);
+}

@@ -1,3 +1,5 @@
 build/
 .claude/
 .cache/
+models/.venv/
+models/*.tflite

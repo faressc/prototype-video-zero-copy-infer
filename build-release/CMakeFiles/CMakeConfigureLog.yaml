@@ -1,0 +1,3113 @@
+
+---
+events:
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineSystem.cmake:12 (find_program)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_UNAME"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "uname"
+    candidate_directories:
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/lib64/ccache/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+      - "/bin/"
+    searched_directories:
+      - "/home/faressc/self-builds/emsdk/uname"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/uname"
+      - "/home/faressc/.npm-global/bin/uname"
+      - "/home/faressc/.local/bin/uname"
+      - "/usr/lib64/ccache/uname"
+      - "/usr/local/bin/uname"
+    found: "/usr/bin/uname"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      The system is: Linux - 7.1.6-400.asahi.fc44.aarch64+16k - aarch64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeNinjaFindMake.cmake:5 (find_program)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_MAKE_PROGRAM"
+    description: "Program used to build from build.ninja files."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ninja-build"
+      - "ninja"
+      - "samu"
+    candidate_directories:
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/lib64/ccache/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/home/faressc/self-builds/emsdk/ninja-build"
+      - "/home/faressc/self-builds/emsdk/ninja"
+      - "/home/faressc/self-builds/emsdk/samu"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/ninja-build"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/ninja"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/samu"
+      - "/home/faressc/.npm-global/bin/ninja-build"
+      - "/home/faressc/.npm-global/bin/ninja"
+      - "/home/faressc/.npm-global/bin/samu"
+      - "/home/faressc/.local/bin/ninja-build"
+      - "/home/faressc/.local/bin/ninja"
+      - "/home/faressc/.local/bin/samu"
+      - "/usr/lib64/ccache/ninja-build"
+      - "/usr/lib64/ccache/ninja"
+      - "/usr/lib64/ccache/samu"
+      - "/usr/local/bin/ninja-build"
+      - "/usr/local/bin/ninja"
+      - "/usr/local/bin/samu"
+    found: "/usr/bin/ninja-build"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompiler.cmake:73 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:64 (_cmake_find_compiler)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_C_COMPILER"
+    description: "C compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "cc"
+      - "gcc"
+      - "cl"
+      - "bcc"
+      - "xlc"
+      - "icx"
+      - "clang"
+    candidate_directories:
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/lib64/ccache/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/home/faressc/self-builds/emsdk/cc"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/cc"
+      - "/home/faressc/.npm-global/bin/cc"
+      - "/home/faressc/.local/bin/cc"
+    found: "/usr/lib64/ccache/cc"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:122 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCCompilerId.c.in"
+    candidate_directories:
+      - "/usr/share/cmake/Modules/"
+    found: "/usr/share/cmake/Modules/CMakeCCompilerId.c.in"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:122 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: /usr/lib64/ccache/cc 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is GNU, found in:
+        /home/faressc/concepts/simple-wayland-window/build-release/CMakeFiles/4.3.0/CompilerIdC/a.out
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_AR"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ar"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/ar"
+      - "/home/faressc/self-builds/emsdk/ar"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/ar"
+      - "/home/faressc/.npm-global/bin/ar"
+      - "/home/faressc/.local/bin/ar"
+      - "/usr/local/bin/ar"
+    found: "/usr/bin/ar"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_RANLIB"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ranlib"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/ranlib"
+      - "/home/faressc/self-builds/emsdk/ranlib"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/ranlib"
+      - "/home/faressc/.npm-global/bin/ranlib"
+      - "/home/faressc/.local/bin/ranlib"
+      - "/usr/local/bin/ranlib"
+    found: "/usr/bin/ranlib"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_STRIP"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "strip"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/strip"
+      - "/home/faressc/self-builds/emsdk/strip"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/strip"
+      - "/home/faressc/.npm-global/bin/strip"
+      - "/home/faressc/.local/bin/strip"
+      - "/usr/local/bin/strip"
+    found: "/usr/bin/strip"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ld"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/ld"
+      - "/home/faressc/self-builds/emsdk/ld"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/ld"
+      - "/home/faressc/.npm-global/bin/ld"
+      - "/home/faressc/.local/bin/ld"
+      - "/usr/local/bin/ld"
+    found: "/usr/bin/ld"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_NM"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "nm"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/nm"
+      - "/home/faressc/self-builds/emsdk/nm"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/nm"
+      - "/home/faressc/.npm-global/bin/nm"
+      - "/home/faressc/.local/bin/nm"
+      - "/usr/local/bin/nm"
+    found: "/usr/bin/nm"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_OBJDUMP"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "objdump"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/objdump"
+      - "/home/faressc/self-builds/emsdk/objdump"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/objdump"
+      - "/home/faressc/.npm-global/bin/objdump"
+      - "/home/faressc/.local/bin/objdump"
+      - "/usr/local/bin/objdump"
+    found: "/usr/bin/objdump"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_OBJCOPY"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "objcopy"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/objcopy"
+      - "/home/faressc/self-builds/emsdk/objcopy"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/objcopy"
+      - "/home/faressc/.npm-global/bin/objcopy"
+      - "/home/faressc/.local/bin/objcopy"
+      - "/usr/local/bin/objcopy"
+    found: "/usr/bin/objcopy"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_READELF"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "readelf"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/readelf"
+      - "/home/faressc/self-builds/emsdk/readelf"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/readelf"
+      - "/home/faressc/.npm-global/bin/readelf"
+      - "/home/faressc/.local/bin/readelf"
+      - "/usr/local/bin/readelf"
+    found: "/usr/bin/readelf"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_DLLTOOL"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "dlltool"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/dlltool"
+      - "/home/faressc/self-builds/emsdk/dlltool"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/dlltool"
+      - "/home/faressc/.npm-global/bin/dlltool"
+      - "/home/faressc/.local/bin/dlltool"
+      - "/usr/local/bin/dlltool"
+      - "/usr/bin/dlltool"
+      - "/usr/local/sbin/dlltool"
+      - "/usr/sbin/dlltool"
+      - "/home/faressc/android-sdk/platform-tools/dlltool"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/dlltool"
+      - "/usr/local/go/bin/dlltool"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/dlltool"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/dlltool"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/dlltool"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/dlltool"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_ADDR2LINE"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "addr2line"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/addr2line"
+      - "/home/faressc/self-builds/emsdk/addr2line"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/addr2line"
+      - "/home/faressc/.npm-global/bin/addr2line"
+      - "/home/faressc/.local/bin/addr2line"
+      - "/usr/local/bin/addr2line"
+    found: "/usr/bin/addr2line"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_TAPI"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "tapi"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/tapi"
+      - "/home/faressc/self-builds/emsdk/tapi"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/tapi"
+      - "/home/faressc/.npm-global/bin/tapi"
+      - "/home/faressc/.local/bin/tapi"
+      - "/usr/local/bin/tapi"
+      - "/usr/bin/tapi"
+      - "/usr/local/sbin/tapi"
+      - "/usr/sbin/tapi"
+      - "/home/faressc/android-sdk/platform-tools/tapi"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/tapi"
+      - "/usr/local/go/bin/tapi"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/tapi"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/tapi"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/tapi"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/tapi"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/Compiler/GNU-FindBinUtils.cmake:18 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:201 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_C_COMPILER_AR"
+    description: "A wrapper around 'ar' adding the appropriate '--plugin' option for the GCC compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "gcc-ar-16.2"
+      - "gcc-ar-16"
+      - "gcc-ar16"
+      - "gcc-ar"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/gcc-ar-16.2"
+      - "/home/faressc/self-builds/emsdk/gcc-ar-16.2"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ar-16.2"
+      - "/home/faressc/.npm-global/bin/gcc-ar-16.2"
+      - "/home/faressc/.local/bin/gcc-ar-16.2"
+      - "/usr/local/bin/gcc-ar-16.2"
+      - "/usr/bin/gcc-ar-16.2"
+      - "/usr/local/sbin/gcc-ar-16.2"
+      - "/usr/sbin/gcc-ar-16.2"
+      - "/home/faressc/android-sdk/platform-tools/gcc-ar-16.2"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/gcc-ar-16.2"
+      - "/usr/local/go/bin/gcc-ar-16.2"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/gcc-ar-16.2"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/gcc-ar-16.2"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/gcc-ar-16.2"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/gcc-ar-16.2"
+      - "/usr/lib64/ccache/gcc-ar-16"
+      - "/home/faressc/self-builds/emsdk/gcc-ar-16"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ar-16"
+      - "/home/faressc/.npm-global/bin/gcc-ar-16"
+      - "/home/faressc/.local/bin/gcc-ar-16"
+      - "/usr/local/bin/gcc-ar-16"
+      - "/usr/bin/gcc-ar-16"
+      - "/usr/local/sbin/gcc-ar-16"
+      - "/usr/sbin/gcc-ar-16"
+      - "/home/faressc/android-sdk/platform-tools/gcc-ar-16"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/gcc-ar-16"
+      - "/usr/local/go/bin/gcc-ar-16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/gcc-ar-16"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/gcc-ar-16"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/gcc-ar-16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/gcc-ar-16"
+      - "/usr/lib64/ccache/gcc-ar16"
+      - "/home/faressc/self-builds/emsdk/gcc-ar16"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ar16"
+      - "/home/faressc/.npm-global/bin/gcc-ar16"
+      - "/home/faressc/.local/bin/gcc-ar16"
+      - "/usr/local/bin/gcc-ar16"
+      - "/usr/bin/gcc-ar16"
+      - "/usr/local/sbin/gcc-ar16"
+      - "/usr/sbin/gcc-ar16"
+      - "/home/faressc/android-sdk/platform-tools/gcc-ar16"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/gcc-ar16"
+      - "/usr/local/go/bin/gcc-ar16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/gcc-ar16"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/gcc-ar16"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/gcc-ar16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/gcc-ar16"
+      - "/usr/lib64/ccache/gcc-ar"
+      - "/home/faressc/self-builds/emsdk/gcc-ar"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ar"
+      - "/home/faressc/.npm-global/bin/gcc-ar"
+      - "/home/faressc/.local/bin/gcc-ar"
+      - "/usr/local/bin/gcc-ar"
+    found: "/usr/bin/gcc-ar"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/Compiler/GNU-FindBinUtils.cmake:30 (find_program)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCCompiler.cmake:201 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_C_COMPILER_RANLIB"
+    description: "A wrapper around 'ranlib' adding the appropriate '--plugin' option for the GCC compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "gcc-ranlib-16.2"
+      - "gcc-ranlib-16"
+      - "gcc-ranlib16"
+      - "gcc-ranlib"
+    candidate_directories:
+      - "/usr/lib64/ccache/"
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+    searched_directories:
+      - "/usr/lib64/ccache/gcc-ranlib-16.2"
+      - "/home/faressc/self-builds/emsdk/gcc-ranlib-16.2"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ranlib-16.2"
+      - "/home/faressc/.npm-global/bin/gcc-ranlib-16.2"
+      - "/home/faressc/.local/bin/gcc-ranlib-16.2"
+      - "/usr/local/bin/gcc-ranlib-16.2"
+      - "/usr/bin/gcc-ranlib-16.2"
+      - "/usr/local/sbin/gcc-ranlib-16.2"
+      - "/usr/sbin/gcc-ranlib-16.2"
+      - "/home/faressc/android-sdk/platform-tools/gcc-ranlib-16.2"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/gcc-ranlib-16.2"
+      - "/usr/local/go/bin/gcc-ranlib-16.2"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/gcc-ranlib-16.2"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/gcc-ranlib-16.2"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/gcc-ranlib-16.2"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/gcc-ranlib-16.2"
+      - "/usr/lib64/ccache/gcc-ranlib-16"
+      - "/home/faressc/self-builds/emsdk/gcc-ranlib-16"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ranlib-16"
+      - "/home/faressc/.npm-global/bin/gcc-ranlib-16"
+      - "/home/faressc/.local/bin/gcc-ranlib-16"
+      - "/usr/local/bin/gcc-ranlib-16"
+      - "/usr/bin/gcc-ranlib-16"
+      - "/usr/local/sbin/gcc-ranlib-16"
+      - "/usr/sbin/gcc-ranlib-16"
+      - "/home/faressc/android-sdk/platform-tools/gcc-ranlib-16"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/gcc-ranlib-16"
+      - "/usr/local/go/bin/gcc-ranlib-16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/gcc-ranlib-16"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/gcc-ranlib-16"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/gcc-ranlib-16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/gcc-ranlib-16"
+      - "/usr/lib64/ccache/gcc-ranlib16"
+      - "/home/faressc/self-builds/emsdk/gcc-ranlib16"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ranlib16"
+      - "/home/faressc/.npm-global/bin/gcc-ranlib16"
+      - "/home/faressc/.local/bin/gcc-ranlib16"
+      - "/usr/local/bin/gcc-ranlib16"
+      - "/usr/bin/gcc-ranlib16"
+      - "/usr/local/sbin/gcc-ranlib16"
+      - "/usr/sbin/gcc-ranlib16"
+      - "/home/faressc/android-sdk/platform-tools/gcc-ranlib16"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/gcc-ranlib16"
+      - "/usr/local/go/bin/gcc-ranlib16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/gcc-ranlib16"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/gcc-ranlib16"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/gcc-ranlib16"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/gcc-ranlib16"
+      - "/usr/lib64/ccache/gcc-ranlib"
+      - "/home/faressc/self-builds/emsdk/gcc-ranlib"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/gcc-ranlib"
+      - "/home/faressc/.npm-global/bin/gcc-ranlib"
+      - "/home/faressc/.local/bin/gcc-ranlib"
+      - "/usr/local/bin/gcc-ranlib"
+    found: "/usr/bin/gcc-ranlib"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "/usr/share/cmake/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "/home/faressc/concepts/simple-wayland-window/build-release/CMakeFiles/CMakeScratch/TryCompile-3GFtEp"
+      binary: "/home/faressc/concepts/simple-wayland-window/build-release/CMakeFiles/CMakeScratch/TryCompile-3GFtEp"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/faressc/concepts/simple-wayland-window/build-release/CMakeFiles/CMakeScratch/TryCompile-3GFtEp'
+        
+        Run Build Command(s): /usr/bin/ninja-build -v cmTC_23876
+        [1/2] /usr/lib64/ccache/cc   -v -o CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake/Modules/CMakeCCompilerABI.c
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        Target: aarch64-redhat-linux
+        Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-aarch64-redhat-linux/isl-install --enable-gnu-indirect-function --build=aarch64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp --disable-libquadmath
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) 
+        COLLECT_GCC_OPTIONS='-fdiagnostics-color=always' '-v' '-c' '-o' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'CMakeFiles/cmTC_07f53.dir/'
+         /usr/libexec/gcc/aarch64-redhat-linux/16/cc1 -quiet -v /usr/share/cmake/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_07f53.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mlittle-endian -mabi=lp64 -version -fdiagnostics-color=always -o /tmp/ccA8ywdz.s
+        GNU C23 (GCC) version 16.2.1 20260819 (Red Hat 16.2.1-2) (aarch64-redhat-linux)
+        	compiled by GNU C version 16.2.1 20260819 (Red Hat 16.2.1-2), GMP version 6.3.0, MPFR version 4.2.2, MPC version 1.4.1, isl version isl-0.24-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring nonexistent directory "/usr/lib/gcc/aarch64-redhat-linux/16/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/aarch64-redhat-linux/16/../../../../aarch64-redhat-linux/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/lib/gcc/aarch64-redhat-linux/16/include
+         /usr/local/include
+         /usr/include
+        End of search list.
+        Compiler executable checksum: ab2c3b7f4f42588eda38f522ba8c57fa
+        COLLECT_GCC_OPTIONS='-fdiagnostics-color=always' '-v' '-c' '-o' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'CMakeFiles/cmTC_07f53.dir/'
+         as -v -EL -mabi=lp64 -o CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o /tmp/ccA8ywdz.s
+        GNU assembler version 2.46.1 (aarch64-redhat-linux) using BFD version version 2.46.1-1.fc44
+        COMPILER_PATH=/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/:/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/
+        LIBRARY_PATH=/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-fdiagnostics-color=always' '-v' '-c' '-o' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.'
+        [2/2] : && /usr/lib64/ccache/cc  -v -Wl,-v CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -o cmTC_23876   && :
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper
+        Target: aarch64-redhat-linux
+        Configured with: ../configure --enable-bootstrap --enable-languages=c,c++,fortran,objc,obj-c++,ada,go,d,m2,cobol,algol68,lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-aarch64-redhat-linux/isl-install --enable-gnu-indirect-function --build=aarch64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp --disable-libquadmath
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) 
+        COMPILER_PATH=/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/:/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/
+        LIBRARY_PATH=/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_23876' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'cmTC_23876.'
+         /usr/libexec/gcc/aarch64-redhat-linux/16/collect2 -plugin /usr/libexec/gcc/aarch64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccMomclc.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -dynamic-linker /lib/ld-linux-aarch64.so.1 -X -EL -maarch64linux -o cmTC_23876 /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/aarch64-redhat-linux/16 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -lgcc -lgcc_s_asneeded -latomic_asneeded -lc -lgcc -lgcc_s_asneeded /usr/lib/gcc/aarch64-redhat-linux/16/crtend.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o
+        collect2 version 16.2.1 20260819 (Red Hat 16.2.1-2)
+        /usr/bin/ld -plugin /usr/libexec/gcc/aarch64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccMomclc.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -dynamic-linker /lib/ld-linux-aarch64.so.1 -X -EL -maarch64linux -o cmTC_23876 /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/aarch64-redhat-linux/16 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -lgcc -lgcc_s_asneeded -latomic_asneeded -lc -lgcc -lgcc_s_asneeded /usr/lib/gcc/aarch64-redhat-linux/16/crtend.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o
+        GNU ld version 2.46.1-1.fc44
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_23876' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'cmTC_23876.'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:217 (message)"
+      - "/usr/share/cmake/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/lib/gcc/aarch64-redhat-linux/16/include]
+          add: [/usr/local/include]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/lib/gcc/aarch64-redhat-linux/16/include] ==> [/usr/lib/gcc/aarch64-redhat-linux/16/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/lib/gcc/aarch64-redhat-linux/16/include;/usr/local/include;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "/usr/share/cmake/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)))("|,| |$)]
+        ignore line: [Change Dir: '/home/faressc/concepts/simple-wayland-window/build-release/CMakeFiles/CMakeScratch/TryCompile-3GFtEp']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/ninja-build -v cmTC_23876]
+        ignore line: [[1/2] /usr/lib64/ccache/cc   -v -o CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake/Modules/CMakeCCompilerABI.c]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [Target: aarch64-redhat-linux]
+        ignore line: [Configured with: ../configure --enable-bootstrap --enable-languages=c c++ fortran objc obj-c++ ada go d m2 cobol algol68 lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-aarch64-redhat-linux/isl-install --enable-gnu-indirect-function --build=aarch64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp --disable-libquadmath]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-fdiagnostics-color=always' '-v' '-c' '-o' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'CMakeFiles/cmTC_07f53.dir/']
+        ignore line: [ /usr/libexec/gcc/aarch64-redhat-linux/16/cc1 -quiet -v /usr/share/cmake/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_07f53.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mlittle-endian -mabi=lp64 -version -fdiagnostics-color=always -o /tmp/ccA8ywdz.s]
+        ignore line: [GNU C23 (GCC) version 16.2.1 20260819 (Red Hat 16.2.1-2) (aarch64-redhat-linux)]
+        ignore line: [	compiled by GNU C version 16.2.1 20260819 (Red Hat 16.2.1-2)  GMP version 6.3.0  MPFR version 4.2.2  MPC version 1.4.1  isl version isl-0.24-GMP]
+        ignore line: []
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/aarch64-redhat-linux/16/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/aarch64-redhat-linux/16/../../../../aarch64-redhat-linux/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/lib/gcc/aarch64-redhat-linux/16/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: ab2c3b7f4f42588eda38f522ba8c57fa]
+        ignore line: [COLLECT_GCC_OPTIONS='-fdiagnostics-color=always' '-v' '-c' '-o' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'CMakeFiles/cmTC_07f53.dir/']
+        ignore line: [ as -v -EL -mabi=lp64 -o CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o /tmp/ccA8ywdz.s]
+        ignore line: [GNU assembler version 2.46.1 (aarch64-redhat-linux) using BFD version version 2.46.1-1.fc44]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/:/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-fdiagnostics-color=always' '-v' '-c' '-o' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.o' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'CMakeFiles/cmTC_07f53.dir/CMakeCCompilerABI.c.']
+        ignore line: [[2/2] : && /usr/lib64/ccache/cc  -v -Wl -v CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -o cmTC_23876   && :]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper]
+        ignore line: [Target: aarch64-redhat-linux]
+        ignore line: [Configured with: ../configure --enable-bootstrap --enable-languages=c c++ fortran objc obj-c++ ada go d m2 cobol algol68 lto --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=https://bugzilla.redhat.com/ --enable-shared --enable-threads=posix --enable-checking=release --enable-multilib --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only --enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=/usr/share/zoneinfo --with-linker-hash-style=gnu --enable-plugin --enable-initfini-array --with-isl=/builddir/build/BUILD/gcc-16.2.1-build/gcc-16.2.1-20260819/obj-aarch64-redhat-linux/isl-install --enable-gnu-indirect-function --build=aarch64-redhat-linux --with-build-config=bootstrap-lto --enable-link-serialization=1 --disable-libssp --disable-libquadmath]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 16.2.1 20260819 (Red Hat 16.2.1-2) (GCC) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/16/:/usr/libexec/gcc/aarch64-redhat-linux/:/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/aarch64-redhat-linux/16/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/:/lib/../lib64/:/usr/lib/../lib64/:/usr/lib/gcc/aarch64-redhat-linux/16/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_23876' '-mlittle-endian' '-mabi=lp64' '-dumpdir' 'cmTC_23876.']
+        link line: [ /usr/libexec/gcc/aarch64-redhat-linux/16/collect2 -plugin /usr/libexec/gcc/aarch64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccMomclc.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -dynamic-linker /lib/ld-linux-aarch64.so.1 -X -EL -maarch64linux -o cmTC_23876 /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/aarch64-redhat-linux/16 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -lgcc -lgcc_s_asneeded -latomic_asneeded -lc -lgcc -lgcc_s_asneeded /usr/lib/gcc/aarch64-redhat-linux/16/crtend.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o]
+          arg [/usr/libexec/gcc/aarch64-redhat-linux/16/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/aarch64-redhat-linux/16/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccMomclc.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s_asneeded] ==> ignore
+          arg [-plugin-opt=-pass-through=-latomic_asneeded] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s_asneeded] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--no-add-needed] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib/ld-linux-aarch64.so.1] ==> ignore
+          arg [-X] ==> ignore
+          arg [-EL] ==> ignore
+          arg [-maarch64linux] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_23876] ==> ignore
+          arg [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o] ==> obj [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o]
+          arg [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o] ==> obj [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o]
+          arg [/usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o] ==> obj [/usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o]
+          arg [-L/usr/lib/gcc/aarch64-redhat-linux/16] ==> dir [/usr/lib/gcc/aarch64-redhat-linux/16]
+          arg [-L/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64] ==> dir [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64]
+          arg [-L/lib/../lib64] ==> dir [/lib/../lib64]
+          arg [-L/usr/lib/../lib64] ==> dir [/usr/lib/../lib64]
+          arg [-L/usr/lib/gcc/aarch64-redhat-linux/16/../../..] ==> dir [/usr/lib/gcc/aarch64-redhat-linux/16/../../..]
+          arg [-L/lib] ==> dir [/lib]
+          arg [-L/usr/lib] ==> dir [/usr/lib]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o] ==> ignore
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lgcc_s_asneeded] ==> lib [gcc_s_asneeded]
+          arg [-latomic_asneeded] ==> lib [atomic_asneeded]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lgcc_s_asneeded] ==> lib [gcc_s_asneeded]
+          arg [/usr/lib/gcc/aarch64-redhat-linux/16/crtend.o] ==> obj [/usr/lib/gcc/aarch64-redhat-linux/16/crtend.o]
+          arg [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o] ==> obj [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o]
+        ignore line: [collect2 version 16.2.1 20260819 (Red Hat 16.2.1-2)]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/aarch64-redhat-linux/16/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/aarch64-redhat-linux/16/lto-wrapper -plugin-opt=-fresolution=/tmp/ccMomclc.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded -plugin-opt=-pass-through=-latomic_asneeded -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s_asneeded --build-id --no-add-needed --eh-frame-hdr --hash-style=gnu -dynamic-linker /lib/ld-linux-aarch64.so.1 -X -EL -maarch64linux -o cmTC_23876 /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o /usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o -L/usr/lib/gcc/aarch64-redhat-linux/16 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64 -L/lib/../lib64 -L/usr/lib/../lib64 -L/usr/lib/gcc/aarch64-redhat-linux/16/../../.. -L/lib -L/usr/lib -v CMakeFiles/cmTC_23876.dir/CMakeCCompilerABI.c.o -lgcc -lgcc_s_asneeded -latomic_asneeded -lc -lgcc -lgcc_s_asneeded /usr/lib/gcc/aarch64-redhat-linux/16/crtend.o /usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o]
+        linker tool for 'C': /usr/bin/ld
+        collapse obj [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crt1.o] ==> [/usr/lib64/crt1.o]
+        collapse obj [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crti.o] ==> [/usr/lib64/crti.o]
+        collapse obj [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64/crtn.o] ==> [/usr/lib64/crtn.o]
+        collapse library dir [/usr/lib/gcc/aarch64-redhat-linux/16] ==> [/usr/lib/gcc/aarch64-redhat-linux/16]
+        collapse library dir [/usr/lib/gcc/aarch64-redhat-linux/16/../../../../lib64] ==> [/usr/lib64]
+        collapse library dir [/lib/../lib64] ==> [/lib64]
+        collapse library dir [/usr/lib/../lib64] ==> [/usr/lib64]
+        collapse library dir [/usr/lib/gcc/aarch64-redhat-linux/16/../../..] ==> [/usr/lib]
+        collapse library dir [/lib] ==> [/lib]
+        collapse library dir [/usr/lib] ==> [/usr/lib]
+        implicit libs: [gcc;gcc_s_asneeded;atomic_asneeded;c;gcc;gcc_s_asneeded]
+        implicit objs: [/usr/lib64/crt1.o;/usr/lib64/crti.o;/usr/lib/gcc/aarch64-redhat-linux/16/crtbegin.o;/usr/lib/gcc/aarch64-redhat-linux/16/crtend.o;/usr/lib64/crtn.o]
+        implicit dirs: [/usr/lib/gcc/aarch64-redhat-linux/16;/usr/lib64;/lib64;/usr/lib;/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "/usr/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "/usr/share/cmake/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Running the C compiler's linker: "/usr/bin/ld" "-v"
+      GNU ld version 2.46.1-1.fc44
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:517 (find_program)"
+      - "CMakeLists.txt:22 (find_package)"
+    mode: "program"
+    variable: "PKG_CONFIG_EXECUTABLE"
+    description: "pkg-config executable"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "pkg-config"
+      - "pkgconf"
+    candidate_directories:
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/lib64/ccache/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/local/"
+      - "/usr/bin/"
+      - "/usr/sbin/"
+      - "/usr/"
+      - "/bin/"
+      - "/sbin/"
+      - "/usr/X11R6/bin/"
+      - "/usr/X11R6/sbin/"
+      - "/usr/X11R6/"
+      - "/usr/pkg/bin/"
+      - "/usr/pkg/sbin/"
+      - "/usr/pkg/"
+      - "/opt/bin/"
+      - "/opt/sbin/"
+      - "/opt/"
+    searched_directories:
+      - "/home/faressc/self-builds/emsdk/pkg-config"
+      - "/home/faressc/self-builds/emsdk/pkgconf"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/pkg-config"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/pkgconf"
+      - "/home/faressc/.npm-global/bin/pkg-config"
+      - "/home/faressc/.npm-global/bin/pkgconf"
+      - "/home/faressc/.local/bin/pkg-config"
+      - "/home/faressc/.local/bin/pkgconf"
+      - "/usr/lib64/ccache/pkg-config"
+      - "/usr/lib64/ccache/pkgconf"
+      - "/usr/local/bin/pkg-config"
+      - "/usr/local/bin/pkgconf"
+    found: "/usr/bin/pkg-config"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:23 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_WAYLAND_CLIENT_wayland-client"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "wayland-client"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libwayland-client.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:23 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_WAYLAND_CLIENT_m"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "m"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:26 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_XKBCOMMON_xkbcommon"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "xkbcommon"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libxkbcommon.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:29 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_WAYLAND_CURSOR_wayland-cursor"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "wayland-cursor"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libwayland-cursor.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:94 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_EGLSURFACE_STACK_EGL"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "EGL"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libEGL.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:94 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_EGLSURFACE_STACK_GLESv2"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "GLESv2"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libGLESv2.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:94 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_EGLSURFACE_STACK_wayland-egl"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "wayland-egl"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libwayland-egl.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:94 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_EGLSURFACE_STACK_wayland-client"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "wayland-client"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libwayland-client.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:94 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_EGLSURFACE_STACK_m"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "m"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:102 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_DMABUF_STACK_EGL"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "EGL"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libEGL.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:102 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_DMABUF_STACK_GLESv2"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "GLESv2"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libGLESv2.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:102 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_DMABUF_STACK_gbm"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "gbm"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libgbm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:102 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_DMABUF_STACK_drm"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "drm"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libdrm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:111 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_VULKAN_vulkan"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "vulkan"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libvulkan.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "CMakeLists.txt:112 (find_program)"
+    mode: "program"
+    variable: "GLSLC"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "glslc"
+    candidate_directories:
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/lib64/ccache/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/local/"
+      - "/usr/bin/"
+      - "/usr/sbin/"
+      - "/usr/"
+      - "/bin/"
+      - "/sbin/"
+      - "/usr/X11R6/bin/"
+      - "/usr/X11R6/sbin/"
+      - "/usr/X11R6/"
+      - "/usr/pkg/bin/"
+      - "/usr/pkg/sbin/"
+      - "/usr/pkg/"
+      - "/opt/bin/"
+      - "/opt/sbin/"
+      - "/opt/"
+    searched_directories:
+      - "/home/faressc/self-builds/emsdk/glslc"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/glslc"
+      - "/home/faressc/.npm-global/bin/glslc"
+      - "/home/faressc/.local/bin/glslc"
+      - "/usr/lib64/ccache/glslc"
+      - "/usr/local/bin/glslc"
+    found: "/usr/bin/glslc"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "CMakeLists.txt:113 (find_program)"
+    mode: "program"
+    variable: "GLSLANG"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "glslangValidator"
+    candidate_directories:
+      - "/home/faressc/self-builds/emsdk/"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/"
+      - "/home/faressc/.npm-global/bin/"
+      - "/home/faressc/.local/bin/"
+      - "/usr/lib64/ccache/"
+      - "/usr/local/bin/"
+      - "/usr/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/sbin/"
+      - "/home/faressc/android-sdk/platform-tools/"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/"
+      - "/usr/local/go/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/sbin/"
+      - "/usr/local/"
+      - "/usr/bin/"
+      - "/usr/sbin/"
+      - "/usr/"
+      - "/bin/"
+      - "/sbin/"
+      - "/usr/X11R6/bin/"
+      - "/usr/X11R6/sbin/"
+      - "/usr/X11R6/"
+      - "/usr/pkg/bin/"
+      - "/usr/pkg/sbin/"
+      - "/usr/pkg/"
+      - "/opt/bin/"
+      - "/opt/sbin/"
+      - "/opt/"
+    searched_directories:
+      - "/home/faressc/self-builds/emsdk/glslangValidator"
+      - "/home/faressc/self-builds/emsdk/upstream/emscripten/glslangValidator"
+      - "/home/faressc/.npm-global/bin/glslangValidator"
+      - "/home/faressc/.local/bin/glslangValidator"
+      - "/usr/lib64/ccache/glslangValidator"
+      - "/usr/local/bin/glslangValidator"
+      - "/usr/bin/glslangValidator"
+      - "/usr/local/sbin/glslangValidator"
+      - "/usr/sbin/glslangValidator"
+      - "/home/faressc/android-sdk/platform-tools/glslangValidator"
+      - "/home/faressc/android-sdk/cmdline-tools/latest/bin/glslangValidator"
+      - "/usr/local/go/bin/glslangValidator"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin/glslangValidator"
+      - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin/glslangValidator"
+      - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin/glslangValidator"
+      - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin/glslangValidator"
+      - "/usr/local/bin/glslangValidator"
+      - "/usr/local/sbin/glslangValidator"
+      - "/usr/local/glslangValidator"
+      - "/usr/bin/glslangValidator"
+      - "/usr/sbin/glslangValidator"
+      - "/usr/glslangValidator"
+      - "/bin/glslangValidator"
+      - "/sbin/glslangValidator"
+      - "/usr/X11R6/bin/glslangValidator"
+      - "/usr/X11R6/sbin/glslangValidator"
+      - "/usr/X11R6/glslangValidator"
+      - "/usr/pkg/bin/glslangValidator"
+      - "/usr/pkg/sbin/glslangValidator"
+      - "/usr/pkg/glslangValidator"
+      - "/opt/bin/glslangValidator"
+      - "/opt/sbin/glslangValidator"
+      - "/opt/glslangValidator"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_EGL"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "EGL"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libEGL.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_GLESv2"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "GLESv2"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libGLESv2.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_gbm"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "gbm"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libgbm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_drm"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "drm"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libdrm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_wayland-egl"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "wayland-egl"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libwayland-egl.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_wayland-client"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "wayland-client"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libwayland-client.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:193 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_GLES_PRESENT_STACK_m"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "m"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:761 (find_library)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:811 (_pkg_find_libs)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1149 (_pkg_recalculate)"
+      - "/usr/share/cmake/Modules/FindPkgConfig.cmake:1166 (_pkg_check_modules_internal)"
+      - "CMakeLists.txt:237 (pkg_check_modules)"
+    mode: "library"
+    variable: "pkgcfg_lib_LIBDRM_drm"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "drm"
+    candidate_directories:
+      - "/usr/lib64/"
+    found: "/usr/lib64/libdrm.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "CMakeLists.txt:270 (find_library)"
+    mode: "library"
+    variable: "ORT_LIB"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "onnxruntime"
+    candidate_directories:
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/"
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/"
+    found: "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/libonnxruntime.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "CMakeLists.txt:271 (find_path)"
+    mode: "path"
+    variable: "ORT_INCLUDE"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "onnxruntime_c_api.h"
+    candidate_directories:
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/include/onnxruntime/"
+    found: "/home/faressc/opt/onnxruntime-webgpu-extdawn/include/onnxruntime/"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_INCLUDE_PATH:
+        - "/usr/include/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "CMakeLists.txt:272 (find_library)"
+    mode: "library"
+    variable: "DAWN_LIB"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "webgpu_dawn"
+    candidate_directories:
+      - "/home/faressc/opt/dawn/lib64/"
+      - "/home/faressc/opt/dawn/lib64/"
+    found: "/home/faressc/opt/dawn/lib64/libwebgpu_dawn.so"
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "CMakeLists.txt:273 (find_library)"
+    mode: "library"
+    variable: "ORT_OWN_DAWN"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "webgpu_dawn"
+    candidate_directories:
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/"
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/"
+    searched_directories:
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/"
+      - "/home/faressc/opt/onnxruntime-webgpu-extdawn/lib64/"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "/home/faressc/self-builds/emsdk"
+        - "/home/faressc/self-builds/emsdk/upstream/emscripten"
+        - "/home/faressc/.npm-global/bin"
+        - "/home/faressc/.local/bin"
+        - "/usr/lib64/ccache"
+        - "/usr/local/bin"
+        - "/usr/bin"
+        - "/usr/local/sbin"
+        - "/usr/sbin"
+        - "/home/faressc/android-sdk/platform-tools"
+        - "/home/faressc/android-sdk/cmdline-tools/latest/bin"
+        - "/usr/local/go/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0/bin"
+        - "/home/faressc/.claude/plugins/cache/tanh-tooling/tanh-tools/0.1.4/bin"
+        - "/home/faressc/.claude/plugins/cache/faressc-plugins/faressc-llm-plugin/0.2.0/bin"
+        - "/home/faressc/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/usr"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+...

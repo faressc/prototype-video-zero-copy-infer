@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/faressc/concepts/simple-wayland-window/build-release/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

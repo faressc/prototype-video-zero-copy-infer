@@ -1,0 +1,26 @@
+/* infer_gen_img.comp -- Vulkan fallback writer when the memory may not
+ * be aliased as a buffer: store each float's four bytes as one RGBA8
+ * texel of the linear image (unpackUnorm4x8 <-> pack4x8unorm is exact).
+ */
+#version 450
+#extension GL_GOOGLE_include_directive : enable
+#include "infer_hash.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform P {
+    uint img_w;
+    uint img_h;
+    uint pitch_floats;
+    uint seed;
+} p;
+
+layout(rgba8, set = 0, binding = 0) uniform writeonly image2D img;
+
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+    if (x >= p.img_w || y >= p.img_h) { return; }
+    float f = infer_gen(y * p.img_w + x, p.seed);
+    imageStore(img, ivec2(x, y), unpackUnorm4x8(floatBitsToUint(f)));
+}
