@@ -138,6 +138,7 @@ struct infer_mem_vk {
     VkDeviceSize size;
     int dmabuf_fd;       /* owned */
     int host_visible;    /* memory type is HOST_VISIBLE|HOST_COHERENT */
+    uint32_t mem_type;   /* the memory type index the allocation came from */
     int alias_ok;        /* buffer alias exists and is the writer's target */
     VkSemaphore done;    /* signaled by the last write, SYNC_FD exportable */
     VkSemaphore release; /* imported from the consumer's fence, waited by the next write */
@@ -192,6 +193,12 @@ struct infer_frame {
 /* contexts: one per GPU API, owned (we create) or borrowed            */
 /* ------------------------------------------------------------------ */
 
+/* The DRM format modifiers this GPU's Vulkan driver can import as an
+ * R8G8B8A8_UNORM image -- which is what Dawn's Vulkan backend accepts.
+ * Brings up its own throwaway instance, so a GL-only context can ask
+ * without a Vulkan domain being initialised. Returns the count. */
+int infer_vk_importable_modifiers(uint64_t* out, int max);
+
 struct infer_ctx_gl {
     int owned;
     int drm_fd;
@@ -207,6 +214,9 @@ struct infer_ctx_gl {
     PFNEGLWAITSYNCKHRPROC wait_sync;
     PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence_fd;
     int has_dmabuf_import, has_modifiers, has_native_fence;
+    uint64_t bo_modifier; /* the negotiated layout; see negotiate_modifier */
+    int bo_negotiated;    /* bo_modifier is only meaningful once this is set */
+    int bo_explicit;      /* allocate with the modifier, or let the driver pick */
     GLuint gen_program;
 };
 

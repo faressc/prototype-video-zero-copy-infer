@@ -172,7 +172,7 @@ void infer_registry_init(struct infer_registry* r) {
         {INFER_DOMAIN_GL, INFER_DOMAIN_WGPU, "gl_dmabuf_import", INFER_COST_DEVICE_COPY, probe_gl_to_wgpu, dmabuf_to_wgpu, 0},
         {INFER_DOMAIN_VK, INFER_DOMAIN_WGPU, "vk_dmabuf_import", INFER_COST_DEVICE_COPY, probe_vk_to_wgpu, dmabuf_to_wgpu, 0},
         {INFER_DOMAIN_CPU, INFER_DOMAIN_WGPU, "wgpu_write_buffer", INFER_COST_HOST_COPY, probe_wgpu, wgpu_write_buffer, 0},
-        {INFER_DOMAIN_GL, INFER_DOMAIN_CPU, "gl_bo_map", INFER_COST_HOST_COPY, probe_gl, readback_to_cpu, 0},
+        {INFER_DOMAIN_GL, INFER_DOMAIN_CPU, "gl_read_pixels", INFER_COST_HOST_COPY, probe_gl, readback_to_cpu, 0},
         {INFER_DOMAIN_VK, INFER_DOMAIN_CPU, "vk_map", INFER_COST_HOST_COPY, probe_vk, readback_to_cpu, 0},
         {INFER_DOMAIN_WGPU, INFER_DOMAIN_CPU, "wgpu_map_read", INFER_COST_HOST_COPY, probe_wgpu, readback_to_cpu, 0},
         {INFER_DOMAIN_DMABUF, INFER_DOMAIN_WGPU, "dmabuf_import", INFER_COST_DEVICE_COPY, probe_dmabuf_to_wgpu, dmabuf_to_wgpu, 0},

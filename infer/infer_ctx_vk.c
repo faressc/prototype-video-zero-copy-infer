@@ -418,11 +418,12 @@ static int alloc_tensor(struct infer_ctx_vk* c, const struct infer_desc* d, stru
     /* 4. exportable memory, host-visible if the driver lets us */
     VkDeviceSize size = img_req.memoryRequirements.size;
     if (alias_ok && buf_req.size > size) { size = buf_req.size; }
-    uint32_t type = find_memory_type(
-        c, bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    m->host_visible = type != UINT32_MAX;
+    uint32_t type = find_memory_type(c, bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (type == UINT32_MAX) { type = find_memory_type(c, bits, 0); }
     INFER_CHECK(type != UINT32_MAX, "vk: no memory type");
+    m->mem_type = type;
+    m->host_visible =
+        (c->mem_props.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
     VkMemoryDedicatedAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
                                          .image = m->image};
     VkExportMemoryAllocateInfo exp = {
@@ -495,12 +496,19 @@ static int alloc_tensor(struct infer_ctx_vk* c, const struct infer_desc* d, stru
     VK_CHECK(vkCreateFence(c->device, &fci, NULL, &m->fence));
 
     fprintf(stderr,
-            "vk: tensor %ux%u pitch %u, writer = %s, memory %s\n",
+            "vk: tensor %ux%u pitch %u, writer = %s, memory %s"
+            " (type %u flags 0x%x, heap %u flags 0x%x, %.0f MiB)\n",
             d->img_w,
             d->img_h,
             t->desc.row_pitch_bytes,
             alias_ok ? "SSBO alias" : "imageStore",
-            m->host_visible ? "host-visible" : "device-local");
+            m->host_visible ? "host-visible" : "device-local",
+            m->mem_type,
+            (unsigned)c->mem_props.memoryTypes[m->mem_type].propertyFlags,
+            c->mem_props.memoryTypes[m->mem_type].heapIndex,
+            (unsigned)c->mem_props.memoryHeaps[c->mem_props.memoryTypes[m->mem_type].heapIndex].flags,
+            (double)c->mem_props.memoryHeaps[c->mem_props.memoryTypes[m->mem_type].heapIndex].size
+                / (1024.0 * 1024.0));
     return 0;
 }
 
@@ -700,4 +708,62 @@ void infer_vk_release(struct infer_ctx_vk* c, struct infer_tensor* t) {
     if (m->image) { vkDestroyImage(c->device, m->image, NULL); }
     if (m->dmabuf_fd >= 0) { close(m->dmabuf_fd); }
     vkFreeMemory(c->device, m->memory, NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* what a Vulkan importer will accept                                  */
+/* ------------------------------------------------------------------ */
+
+/* Dawn's Linux backend is Vulkan, so the modifiers this driver lists
+ * for R8G8B8A8_UNORM are exactly the ones a WebGPU import can accept.
+ * The GL domain needs this to allocate a tensor an importer will take:
+ * left to itself, NVIDIA's GBM hands back a block-linear layout that is
+ * renderable but absent from this list. Standalone instance, because a
+ * gl -> webgpu run never brings up the Vulkan domain. */
+int infer_vk_importable_modifiers(uint64_t* out, int max) {
+    /* Queried once and kept: on NVIDIA, destroying the last VkInstance in
+     * the process tears down driver state the EGL dma-buf import path is
+     * still using, and every later framebuffer over an EGLImage comes
+     * back incomplete. Dawn keeps an instance alive for its own reasons,
+     * which is why a gl -> webgpu run never saw this and a gl -> cpu run
+     * did. So this instance outlives the call on purpose. */
+    static VkInstance inst = VK_NULL_HANDLE;
+    static uint64_t cache[64];
+    static int cached = -1;
+    if (cached >= 0) {
+        int n = cached < max ? cached : max;
+        memcpy(out, cache, (size_t)n * sizeof *out);
+        return n;
+    }
+    cached = 0;
+    VkApplicationInfo ai = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+                            .apiVersion = VK_API_VERSION_1_2};
+    VkInstanceCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+                                .pApplicationInfo = &ai};
+    if (vkCreateInstance(&ici, NULL, &inst) != VK_SUCCESS) { return 0; }
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(inst, &count, NULL);
+    int n = 0;
+    if (count) {
+        VkPhysicalDevice phys = VK_NULL_HANDLE;
+        count = 1;
+        vkEnumeratePhysicalDevices(inst, &count, &phys);
+        VkDrmFormatModifierPropertiesEXT props[64];
+        VkDrmFormatModifierPropertiesListEXT list = {
+            .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+            .drmFormatModifierCount = 64,
+            .pDrmFormatModifierProperties = props};
+        VkFormatProperties2 fp = {.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2, .pNext = &list};
+        vkGetPhysicalDeviceFormatProperties2(phys, VK_FORMAT_R8G8B8A8_UNORM, &fp);
+        for (uint32_t i = 0; i < list.drmFormatModifierCount && n < max; i++) {
+            /* single-plane only: the tensor is one image, and the edge
+             * describes it with one fd, offset and pitch */
+            if (props[i].drmFormatModifierPlaneCount == 1) {
+                out[n++] = props[i].drmFormatModifier;
+            }
+        }
+    }
+    cached = n;
+    memcpy(cache, out, (size_t)n * sizeof *out);
+    return n;
 }

@@ -171,6 +171,102 @@ void infer_ctx_gl_fini(struct infer_ctx_gl* c) {
 /* the tensor: a gbm_bo seen by GL as an RGBA8 renderbuffer            */
 /* ------------------------------------------------------------------ */
 
+/* A GL tensor has to be renderable by this driver AND importable by
+ * whoever consumes it, and left to itself GBM picks a layout that is
+ * only the former. On NVIDIA it hands back the block-linear
+ * 0x300000000e08014, which EGL will happily render into but Vulkan --
+ * and therefore Dawn -- does not list at all, so every dma-buf import
+ * of a GL tensor fails. The two sets do overlap (the 0x3000000006060xx
+ * family here); the fix is to allocate from the intersection instead of
+ * from the driver's preference.
+ *
+ * EGL is asked what it can render into, Vulkan what it can import, and
+ * the overlap is handed to gbm_bo_create_with_modifiers so the driver
+ * still picks its favourite -- just from a set every consumer accepts.
+ * If either query is unavailable, or nothing overlaps, fall back to
+ * letting the driver choose: that is the old behaviour, and it is what
+ * Apple GPUs want anyway (there the driver's tiled choice is the only
+ * layout that renders correctly -- LINEAR makes Mesa shadow the shader
+ * writes into a tiled copy it never flushes to the dma-buf). */
+static void negotiate_modifier(struct infer_ctx_gl* c) {
+    c->bo_negotiated = 1;
+    c->bo_explicit = 0;
+
+    EGLuint64KHR egl_mods[64];
+    EGLBoolean external[64];
+    EGLint egl_n = 0;
+    PFNEGLQUERYDMABUFMODIFIERSEXTPROC query =
+        (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+    if (!c->has_modifiers || !query ||
+        !query(c->dpy, DRM_FORMAT_ABGR8888, 64, egl_mods, external, &egl_n) || egl_n <= 0) {
+        fprintf(stderr, "gl: no modifier query; letting the driver choose the layout\n");
+        return;
+    }
+    uint64_t vk_mods[64];
+    int vk_n = infer_vk_importable_modifiers(vk_mods, 64);
+    if (vk_n <= 0) {
+        fprintf(stderr, "gl: no importer modifier list; letting the driver choose the layout\n");
+        return;
+    }
+
+    uint64_t shared[64];
+    int shared_n = 0;
+    for (EGLint i = 0; i < egl_n && shared_n < 64; i++) {
+        if (external[i]) { continue; } /* sampleable as external only, not renderable */
+        for (int j = 0; j < vk_n; j++) {
+            if ((uint64_t)egl_mods[i] == vk_mods[j]) {
+                shared[shared_n++] = vk_mods[j];
+                break;
+            }
+        }
+    }
+    if (!shared_n) {
+        fprintf(stderr,
+                "gl: no layout is both renderable and importable (%d renderable, %d importable);"
+                " letting the driver choose\n",
+                (int)egl_n,
+                vk_n);
+        return;
+    }
+
+    /* Prefer the finest granularity, not the driver's favourite. Handed
+     * the whole list, NVIDIA's GBM picks a 64-row block height
+     * (0x...606013) and GL and Vulkan then disagree about any image
+     * shorter than one block: GL renders with 64-row blocks, Vulkan's
+     * explicit-layout import walks the same bytes as if the blocks were
+     * clamped to the image, and from the second GOB on the importer
+     * reads GL's padding (a 96x32 tensor: element 16 onward is zero).
+     * NVIDIA's block-linear modifiers keep log2(block height in GOBs)
+     * in the low nibble, so the one-GOB layout (0x...606010, 8-row
+     * blocks) sorts first; other vendors' modifiers stay in list order.
+     * Try them one at a time so the choice is ours, not GBM's. */
+    for (int i = 1; i < shared_n; i++) {
+        uint64_t m = shared[i];
+        int j = i;
+        while (j > 0 && (shared[j - 1] >> 56) == 0x03 && (m >> 56) == 0x03 &&
+               (shared[j - 1] & 0xf) > (m & 0xf)) {
+            shared[j] = shared[j - 1];
+            j--;
+        }
+        shared[j] = m;
+    }
+    for (int i = 0; i < shared_n; i++) {
+        struct gbm_bo* bo = gbm_bo_create_with_modifiers(c->gbm, 64, 64, GBM_FORMAT_ABGR8888, &shared[i], 1);
+        if (!bo) { continue; }
+        c->bo_modifier = gbm_bo_get_modifier(bo);
+        c->bo_explicit = 1;
+        gbm_bo_destroy(bo);
+        fprintf(stderr,
+                "gl: layout 0x%llx (%d renderable, %d importable, %d shared; finest block first)\n",
+                (unsigned long long)c->bo_modifier,
+                (int)egl_n,
+                vk_n,
+                shared_n);
+        return;
+    }
+    fprintf(stderr, "gl: none of the shared layouts can be allocated; letting the driver choose\n");
+}
+
 static int alloc_tensor(struct infer_ctx_gl* c, const struct infer_desc* d, struct infer_tensor* t) {
     t->domain = INFER_DOMAIN_GL;
     t->desc = *d;
@@ -179,11 +275,14 @@ static int alloc_tensor(struct infer_ctx_gl* c, const struct infer_desc* d, stru
     t->released.sync_fd = -1;
     INFER_CHECK(c->has_dmabuf_import, "gl: dma-buf import unavailable");
 
-    /* Let the driver pick the layout. Asking for LINEAR here would make
-     * Mesa shadow every shader write into a tiled copy and never flush
-     * it to the dma-buf (Apple GPUs do not write linear images); the
-     * modifier travels with the fd, so importers see the real layout. */
-    t->mem.gl.bo = gbm_bo_create(c->gbm, d->img_w, d->img_h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING);
+    /* the layout every consumer can live with; see negotiate_modifier.
+     * The modifier travels with the fd, so importers see the real layout. */
+    if (!c->bo_negotiated) { negotiate_modifier(c); }
+    t->mem.gl.bo =
+        c->bo_explicit
+            ? gbm_bo_create_with_modifiers(c->gbm, d->img_w, d->img_h, GBM_FORMAT_ABGR8888,
+                                           &c->bo_modifier, 1)
+            : gbm_bo_create(c->gbm, d->img_w, d->img_h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING);
     INFER_CHECK(t->mem.gl.bo, "gl: gbm_bo_create failed");
     uint64_t mod = gbm_bo_get_modifier(t->mem.gl.bo);
     if (mod == DRM_FORMAT_MOD_INVALID) { mod = DRM_FORMAT_MOD_LINEAR; }
@@ -304,26 +403,27 @@ int infer_gl_gen(struct infer_ctx_gl* c,
     return 0;
 }
 
+/* Read the tensor back through GL rather than by mapping the bo. No
+ * layout is both renderable and CPU-mappable on every driver -- NVIDIA
+ * renders only into block-linear and maps only linear, so gbm_bo_map
+ * fails on exactly the buffers the generator can write. Reading through
+ * the FBO asks the driver to do the detiling it alone knows how to do,
+ * and it is exact: an RGBA8 renderbuffer read as GL_RGBA/GL_UNSIGNED_BYTE
+ * is a byte copy, which is what the bit-exactness check demands. */
 int infer_gl_readback(struct infer_ctx_gl* c, const struct infer_tensor* t, float* dst) {
     (void)c;
-    INFER_CHECK(infer_wait_sync_fd(t->ready.sync_fd, 1000) == 0, "gl: fence wait timed out");
-    uint32_t stride = 0;
-    void* map_data = NULL;
-    void* p = gbm_bo_map(t->mem.gl.bo,
-                         0,
-                         0,
-                         t->desc.img_w,
-                         t->desc.img_h,
-                         GBM_BO_TRANSFER_READ,
-                         &stride,
-                         &map_data);
-    INFER_CHECK(p, "gl: gbm_bo_map failed");
-    for (uint32_t y = 0; y < t->desc.img_h; y++) {
-        memcpy(dst + (size_t)y * t->desc.img_w,
-               (const char*)p + (size_t)y * stride,
-               (size_t)t->desc.img_w * 4);
-    }
-    gbm_bo_unmap(t->mem.gl.bo, map_data);
+    INFER_CHECK(t->mem.gl.fbo, "gl: tensor has no framebuffer to read");
+    glBindFramebuffer(GL_FRAMEBUFFER, t->mem.gl.fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4); /* rows are img_w * 4 bytes */
+    glReadPixels(0,
+                 0,
+                 (GLsizei)t->desc.img_w,
+                 (GLsizei)t->desc.img_h,
+                 GL_RGBA,
+                 GL_UNSIGNED_BYTE,
+                 dst);
+    GLenum err = glGetError();
+    INFER_CHECK(err == GL_NO_ERROR, "gl: glReadPixels failed (0x%x)", err);
     return 0;
 }
 

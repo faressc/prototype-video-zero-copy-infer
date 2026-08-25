@@ -1,0 +1,75 @@
+Vulkan: import dma-bufs with a dedicated allocation, into any type the fd reports
+
+SharedTextureMemory's dma-buf path could only import memory that is
+DEVICE_LOCAL, and allocated it without VkMemoryDedicatedAllocateInfo.
+Both are wrong for a system-memory dma-buf on a discrete GPU -- a
+dma-heap buffer, a V4L2 camera frame, a decoder's output:
+
+  - vkGetMemoryFdPropertiesKHR only ever reports host memory types for
+    such an fd, so MemoryKind::DeviceLocal finds nothing and the import
+    fails with "Failed to find suitable memory type". The memory already
+    exists; the type index names where it is, not where it should go.
+  - NVIDIA's proprietary driver requires a dedicated allocation for the
+    import but reports requires/prefersDedicatedAllocation = false, so
+    detection cannot see it; without one, vkAllocateMemory returns
+    VK_ERROR_OUT_OF_DEVICE_MEMORY (and closes the fd on that failure,
+    which Dawn's SystemHandle then closes again -> abort).
+
+Select from the intersection with no required properties (the selector
+still favours device-local), and always pass the dedicated info: an
+imported allocation backs exactly this image, and the AHardwareBuffer
+and OpaqueFD paths in the same file already allocate this way.
+
+Measured on RTX 2080 Ti / 610.43.02 with a 576x192 R8G8B8A8 dma-heap
+buffer: fd reports types {0,4}; type 0 + dedicated imports and binds,
+every other combination returns -2. Supersedes upstream 2f24fba5fd,
+which adds a HostCached fallback that selects type 4 and still fails.
+
+Against Dawn v20260714.215939.
+diff --git a/src/dawn/native/vulkan/SharedTextureMemoryVk.cpp b/src/dawn/native/vulkan/SharedTextureMemoryVk.cpp
+index 4e5eda7322..a6920c63fb 100644
+--- a/src/dawn/native/vulkan/SharedTextureMemoryVk.cpp
++++ b/src/dawn/native/vulkan/SharedTextureMemoryVk.cpp
+@@ -449,12 +449,15 @@ ResultOrError<Ref<SharedTextureMemory>> SharedTextureMemory::Create(
+     device->fn.GetImageMemoryRequirements(vkDevice, sharedTextureMemory->mVkImage->Get(),
+                                           &memoryRequirements);
+ 
+-    // Choose the best memory type that satisfies both the image's constraint and the
+-    // import's constraint.
++    // Choose a memory type both the image and the fd accept. The fd already backs an
++    // allocation, so this names where the memory *is*, not where it should go: requiring
++    // DEVICE_LOCAL rejects every system-memory dma-buf (dma-heap, V4L2 camera, decoder
++    // output) on a discrete GPU, where the fd only ever reports host memory types. Ask for
++    // no properties; the selector still favours device-local among the candidates.
+     memoryRequirements.memoryTypeBits &= fdProperties.memoryTypeBits;
+     uint32_t memoryTypeIndex;
+     DAWN_TRY_ASSIGN(memoryTypeIndex, device->GetResourceMemoryAllocator()->FindBestTypeIndex(
+-                                         memoryRequirements, MemoryKind::DeviceLocal));
++                                         memoryRequirements, MemoryKind{}));
+ 
+     utils::SystemHandle memoryFD = utils::SystemHandle::Duplicate(fd);
+ 
+@@ -468,10 +471,22 @@ ResultOrError<Ref<SharedTextureMemory>> SharedTextureMemory::Create(
+     importMemoryFdInfo.handleType = handleType;
+     importMemoryFdInfo.fd = memoryFD.Get();
+ 
++    // Imported memory backs exactly this image, which is what a dedicated allocation
++    // states. Some drivers require it for a dma-buf import without saying so through
++    // VkMemoryDedicatedRequirements (NVIDIA proprietary reports requires/prefers both
++    // false, then fails vkAllocateMemory with VK_ERROR_OUT_OF_DEVICE_MEMORY without it),
++    // and where it is not needed it is harmless: the size and offset already match. The
++    // AHardwareBuffer and OpaqueFD paths below already allocate this way.
++    VkMemoryDedicatedAllocateInfo dedicatedAllocateInfo;
++    dedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
++    dedicatedAllocateInfo.image = sharedTextureMemory->mVkImage->Get();
++    dedicatedAllocateInfo.buffer = VkBuffer{};
++
+     // Import the fd as VkDeviceMemory
+     VkDeviceMemory vkDeviceMemory;
+     DAWN_TRY_ASSIGN(vkDeviceMemory,
+-                    AllocateDeviceMemory(device, &memoryAllocateInfo, &importMemoryFdInfo));
++                    AllocateDeviceMemory(device, &memoryAllocateInfo, &dedicatedAllocateInfo,
++                                         &importMemoryFdInfo));
+ 
+     memoryFD.Detach();  // Ownership transfered to the VkDeviceMemory.
+     sharedTextureMemory->mVkDeviceMemory =

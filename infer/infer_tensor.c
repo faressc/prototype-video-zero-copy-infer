@@ -4,6 +4,10 @@
  */
 #include "infer.h"
 
+#if defined(__x86_64__) || defined(__i386__)
+#include <emmintrin.h> /* _mm_clflush, _mm_mfence: SSE2, baseline on x86-64 */
+#endif
+
 #include <fcntl.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-heap.h>
@@ -149,6 +153,29 @@ int infer_dmabuf_sync(const struct infer_tensor* t, int start, int write) {
     return 0;
 }
 
+/* Make CPU writes to a dma-buf visible to a device that reads the pages
+ * without snooping the CPU cache. DMA_BUF_IOCTL_SYNC(END) is the portable
+ * way to ask for that, and on arm64 it is real cache maintenance; on x86
+ * the kernel treats every DMA master as coherent and the ioctl flushes
+ * nothing. NVIDIA's open kernel module maps imported system memory into
+ * the GPU without snooping (measured on a 2080 Ti / 610.43: whatever
+ * barrier the reader uses, it sees the lines as they were before the
+ * write; clflush, non-temporal stores or simply evicting the lines all
+ * make it current), so on x86 the producer flushes by hand. A DMA
+ * producer -- a camera, a decoder -- never needs this: its writes do not
+ * pass through the CPU cache in the first place. */
+static void flush_cpu_writes(const void* p, size_t bytes) {
+#if defined(__x86_64__) || defined(__i386__)
+    const char* line = (const char*)((uintptr_t)p & ~(uintptr_t)63);
+    const char* end = (const char*)p + bytes;
+    for (; line < end; line += 64) { _mm_clflush(line); }
+    _mm_mfence();
+#else
+    (void)p;
+    (void)bytes; /* DMA_BUF_IOCTL_SYNC did the maintenance */
+#endif
+}
+
 int infer_dmabuf_gen(const struct infer_desc* d, uint32_t seed, struct infer_tensor* t) {
     size_t n = infer_desc_elements(d);
     if (!t->mem.dmabuf.map) {
@@ -189,13 +216,15 @@ int infer_dmabuf_gen(const struct infer_desc* d, uint32_t seed, struct infer_ten
     /* DMA_BUF_SYNC_START also waits for every fence attached to the
      * buffer's reservation (implicit sync) -- everything the GPU ever
      * did with it, not just what `released` describes. INFER_DMABUF_NOSYNC=1
-     * skips the bracket to measure that cost (writes still land: the
-     * mapping is coherent on this machine). */
+     * skips the bracket to measure that cost; the cache flush below is
+     * not part of the bracket and stays, because without it a
+     * non-snooping reader sees the previous iteration's bytes. */
     static int nosync = -1;
     if (nosync < 0) { nosync = getenv("INFER_DMABUF_NOSYNC") != NULL; }
     if (!nosync && infer_dmabuf_sync(t, 1, 1) < 0) { return -1; }
     float* f = t->mem.dmabuf.map;
     for (size_t i = 0; i < n; i++) { f[i] = infer_gen_value((uint32_t)i, seed); }
+    flush_cpu_writes(f, n * sizeof(float));
     if (!nosync && infer_dmabuf_sync(t, 0, 1) < 0) { return -1; }
     infer_sync_reset(&t->ready); /* CPU writes are complete on return */
     return 0;

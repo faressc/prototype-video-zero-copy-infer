@@ -222,6 +222,12 @@ int infer_wgpu_gen(struct infer_ctx_wgpu* c,
                    uint32_t seed,
                    struct infer_tensor* t) {
     size_t n = infer_desc_elements(d);
+    /* c->errors is cumulative for the life of the device, so an error
+     * any earlier caller provoked -- a dma-buf import this driver
+     * rejects, say -- would otherwise fail every later operation on a
+     * healthy device. Only errors raised between here and the return
+     * belong to this call. */
+    int errors0 = c->errors;
     if (!t->mem.wgpu.buffer) {
         t->domain = INFER_DOMAIN_WGPU;
         t->desc = *d;
@@ -263,7 +269,7 @@ int infer_wgpu_gen(struct infer_ctx_wgpu* c,
     wgpuCommandEncoderRelease(enc);
     /* same queue as every consumer on this device: ordering is the
      * queue's; nothing to export */
-    return c->errors ? -1 : 0;
+    return c->errors != errors0 ? -1 : 0;
 }
 
 int infer_wgpu_readback(struct infer_ctx_wgpu* c, const struct infer_tensor* t, float* dst) {
@@ -324,6 +330,7 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
         fprintf(stderr, "wgpu: SharedTextureMemoryDmaBuf unavailable\n");
         return NULL;
     }
+    int errors0 = c->errors;
     struct infer_wgpu_import* im = calloc(1, sizeof *im);
     im->c = c;
     im->img_w = d->img_w;
@@ -345,7 +352,7 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
     im->mem = wgpuDeviceImportSharedTextureMemory(c->device, &sd);
     WGPUSharedTextureMemoryProperties props = WGPU_SHARED_TEXTURE_MEMORY_PROPERTIES_INIT;
     if (!im->mem || wgpuSharedTextureMemoryGetProperties(im->mem, &props) != WGPUStatus_Success ||
-        c->errors) {
+        c->errors != errors0) {
         fprintf(stderr, "wgpu: dma-buf import failed\n");
         infer_wgpu_import_destroy(im);
         return NULL;
@@ -363,7 +370,7 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
     im->uniform = wgpuDeviceCreateBuffer(c->device, &ud);
     uint32_t params[4] = {d->img_w, d->img_h, 0, 0};
     wgpuQueueWriteBuffer(c->queue, im->uniform, 0, params, sizeof params);
-    if (c->errors) {
+    if (c->errors != errors0) {
         infer_wgpu_import_destroy(im);
         return NULL;
     }
@@ -384,6 +391,7 @@ int infer_wgpu_import_relayout(struct infer_ctx_wgpu* c,
                                WGPUBuffer dst,
                                int* release_fd) {
     *release_fd = -1;
+    int errors0 = c->errors;
     if (im->bg_dst != dst) {
         if (im->bg) { wgpuBindGroupRelease(im->bg); }
         WGPUBindGroupEntry entries[3] = {
@@ -466,7 +474,7 @@ int infer_wgpu_import_relayout(struct infer_ctx_wgpu* c,
      * BEFORE the relayout is still running (an engine whose Run()
      * returned before its GPU work completed); measure with
      * INFER_WGPU_TRACE=1 before blaming the fence. */
-    return c->errors ? -1 : 0;
+    return c->errors != errors0 ? -1 : 0;
 }
 
 static void on_work_done(WGPUQueueWorkDoneStatus st, WGPUStringView msg, void* u1, void* u2) {
