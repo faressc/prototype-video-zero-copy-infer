@@ -9,6 +9,8 @@
  * effect it applies. Descriptor sets are the "which textures" channel
  * push constants can't be; the per-pass scalars still ride them. */
 #version 450
+/* glslc enables #include implicitly; glslangValidator needs it spelled out */
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 o_color;

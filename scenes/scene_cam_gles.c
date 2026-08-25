@@ -46,6 +46,7 @@ struct pass_uniforms {
 struct cam_scene {
     struct cam_stream stream;
     uint32_t cw, ch;
+    int yuyv; /* camera delivers packed YUYV: imported as half-width RGBA, unpacked in the shader */
 
     EGLImage images[CAM_MAX_BUFFERS];
     GLuint textures[CAM_MAX_BUFFERS]; /* GL_TEXTURE_EXTERNAL_OES, one per buffer */
@@ -106,10 +107,28 @@ static const char* frag_head =
     "uniform float u_time;\n"
     "uniform int u_effect;\n"
     "uniform int u_src;\n"
+    /* YUYV fallback (see import_camera_buffers): the packed buffer is
+     * bound as an RGBA texture of half width, texel = (Y0, U, Y1, V),
+     * and the conversion the sampler would do for NV12 happens here */
+    "uniform int u_cam_yuyv;\n"
+    "uniform float u_cam_w;\n"   /* camera width in pixels */
+    "uniform vec3 u_yuv_range;\n" /* y offset, y scale, chroma scale */
+    "uniform vec4 u_yuv_coef;\n"  /* r<-v, g<-u, g<-v, b<-u */
+    "vec3 cam_sample(vec2 uv) {\n"
+    "    vec4 t = texture2D(u_cam, uv);\n"
+    "    if (u_cam_yuyv == 0) { return t.rgb; }\n"
+    "    float odd = step(0.5, fract(floor(uv.x * u_cam_w) * 0.5));\n"
+    "    float y = (mix(t.r, t.b, odd) - u_yuv_range.x) * u_yuv_range.y;\n"
+    "    float u = (t.g - 0.5) * u_yuv_range.z;\n"
+    "    float v = (t.a - 0.5) * u_yuv_range.z;\n"
+    "    return clamp(vec3(y + u_yuv_coef.x * v,\n"
+    "                      y - u_yuv_coef.y * u - u_yuv_coef.z * v,\n"
+    "                      y + u_yuv_coef.w * u), 0.0, 1.0);\n"
+    "}\n"
     "vec3 src_sample(vec2 uv) {\n"
     "    if (u_src == 1) { return texture2D(u_tmp0, uv).rgb; }\n"
     "    if (u_src == 2) { return texture2D(u_tmp1, uv).rgb; }\n"
-    "    return texture2D(u_cam, uv).rgb;\n"
+    "    return cam_sample(uv);\n"
     "}\n"
     "#define SRC(uv) src_sample(uv)\n"
     "#define U_TEXEL u_texel\n"
@@ -184,7 +203,7 @@ static GLuint link_program(const char* vs_src, const char* frag_tail_src) {
     return prog;
 }
 
-static void lookup_pass_uniforms(GLuint prog, struct pass_uniforms* u) {
+static void lookup_pass_uniforms(const struct cam_scene* s, GLuint prog, struct pass_uniforms* u) {
     u->u_cam = glGetUniformLocation(prog, "u_cam");
     u->u_tmp0 = glGetUniformLocation(prog, "u_tmp0");
     u->u_tmp1 = glGetUniformLocation(prog, "u_tmp1");
@@ -197,6 +216,24 @@ static void lookup_pass_uniforms(GLuint prog, struct pass_uniforms* u) {
     glUniform1i(u->u_cam, 0);
     glUniform1i(u->u_tmp0, 1);
     glUniform1i(u->u_tmp1, 2);
+
+    /* the YUYV unpack parameters, also fixed for the camera's lifetime */
+    const struct camera* cam = &s->stream.cam;
+    glUniform1i(glGetUniformLocation(prog, "u_cam_yuyv"), s->yuyv);
+    glUniform1f(glGetUniformLocation(prog, "u_cam_w"), (float)s->cw);
+    if (camera_is_full_range(cam)) {
+        glUniform3f(glGetUniformLocation(prog, "u_yuv_range"), 0.0f, 1.0f, 1.0f);
+    } else { /* studio swing: Y 16..235, C 16..240 (of 255) */
+        glUniform3f(glGetUniformLocation(prog, "u_yuv_range"),
+                    16.0f / 255.0f,
+                    255.0f / 219.0f,
+                    255.0f / 224.0f);
+    }
+    if (camera_is_bt709(cam)) {
+        glUniform4f(glGetUniformLocation(prog, "u_yuv_coef"), 1.5748f, 0.187324f, 0.468124f, 1.8556f);
+    } else { /* BT.601 */
+        glUniform4f(glGetUniformLocation(prog, "u_yuv_coef"), 1.402f, 0.344136f, 0.714136f, 1.772f);
+    }
 }
 
 static void set_pass_uniforms(const struct cam_scene* s,
@@ -214,7 +251,7 @@ static void build_programs(struct cam_scene* s) {
     s->program = link_program(vert_src, frag_tail);
     s->a_pos = glGetAttribLocation(s->program, "a_pos");
     s->u_flip = glGetUniformLocation(s->program, "u_flip");
-    lookup_pass_uniforms(s->program, &s->pu);
+    lookup_pass_uniforms(s, s->program, &s->pu);
 
     s->cube_program = link_program(cube_vert_src, cube_frag_tail);
     s->c_pos = glGetAttribLocation(s->cube_program, "a_pos");
@@ -223,7 +260,7 @@ static void build_programs(struct cam_scene* s) {
     s->c_mvp = glGetUniformLocation(s->cube_program, "u_mvp");
     s->c_model = glGetUniformLocation(s->cube_program, "u_model");
     s->c_uv_scale = glGetUniformLocation(s->cube_program, "u_uv_scale");
-    lookup_pass_uniforms(s->cube_program, &s->cu);
+    lookup_pass_uniforms(s, s->cube_program, &s->cu);
 
     /* Center-crop the camera image to the square face ("cover"): use the
      * full extent of the short axis, a centered window of the long one.
@@ -253,8 +290,15 @@ static void build_programs(struct cam_scene* s) {
 
 static void import_camera_buffers(struct gles_presenter* p, struct cam_scene* s) {
     const struct camera* cam = &s->stream.cam;
-    if (cam->format.pixelformat != V4L2_PIX_FMT_NV12) {
-        fprintf(stderr, "cam_gles: only NV12 import is implemented\n");
+    /* NV12: two planes (Y, interleaved UV) in one fd; the external
+     * sampler does the YUV->RGB conversion. YUYV (what UVC webcams
+     * actually deliver): one packed plane, 4 bytes per pixel PAIR. Not
+     * every driver imports DRM_FORMAT_YUYV (NVIDIA doesn't), so the same
+     * bytes are imported as an RGBA8 texture of half width -- texel =
+     * (Y0, U, Y1, V) -- and cam_sample() in the shader does the unpack. */
+    const int nv12 = cam->format.pixelformat == V4L2_PIX_FMT_NV12;
+    if (!nv12 && !s->yuyv) {
+        fprintf(stderr, "cam_gles: only NV12 and YUYV import are implemented\n");
         exit(1);
     }
     const char* gl_exts = (const char*)glGetString(GL_EXTENSIONS);
@@ -274,49 +318,57 @@ static void import_camera_buffers(struct gles_presenter* p, struct cam_scene* s)
         EGLAttrib stride = (EGLAttrib)camera_stride(cam);
         /* two planes, same fd, different offsets -- and the colorimetry
          * hints that tell the sampler which YUV->RGB matrix to apply */
-        EGLAttrib attrs[] = {
-            EGL_WIDTH,
-            (EGLAttrib)cam->format.width,
-            EGL_HEIGHT,
-            (EGLAttrib)cam->format.height,
-            EGL_LINUX_DRM_FOURCC_EXT,
-            DRM_FORMAT_NV12,
-            EGL_DMA_BUF_PLANE0_FD_EXT,
-            fd,
-            EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-            0,
-            EGL_DMA_BUF_PLANE0_PITCH_EXT,
-            stride,
-            EGL_DMA_BUF_PLANE1_FD_EXT,
-            fd,
-            EGL_DMA_BUF_PLANE1_OFFSET_EXT,
-            (EGLAttrib)camera_uv_offset(cam),
-            EGL_DMA_BUF_PLANE1_PITCH_EXT,
-            stride,
-            EGL_YUV_COLOR_SPACE_HINT_EXT,
-            camera_is_bt709(cam) ? EGL_ITU_REC709_EXT : EGL_ITU_REC601_EXT,
-            EGL_SAMPLE_RANGE_HINT_EXT,
-            camera_is_full_range(cam) ? EGL_YUV_FULL_RANGE_EXT : EGL_YUV_NARROW_RANGE_EXT,
-            EGL_NONE,
-        };
+        EGLAttrib attrs[32];
+        int n = 0;
+#define ATTR(k, v)                                                                                 \
+    do {                                                                                           \
+        attrs[n++] = (k);                                                                          \
+        attrs[n++] = (EGLAttrib)(v);                                                               \
+    } while (0)
+        ATTR(EGL_WIDTH, nv12 ? cam->format.width : cam->format.width / 2);
+        ATTR(EGL_HEIGHT, cam->format.height);
+        ATTR(EGL_LINUX_DRM_FOURCC_EXT, nv12 ? DRM_FORMAT_NV12 : DRM_FORMAT_ABGR8888);
+        ATTR(EGL_DMA_BUF_PLANE0_FD_EXT, fd);
+        ATTR(EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0);
+        ATTR(EGL_DMA_BUF_PLANE0_PITCH_EXT, stride);
+        if (nv12) {
+            ATTR(EGL_DMA_BUF_PLANE1_FD_EXT, fd);
+            ATTR(EGL_DMA_BUF_PLANE1_OFFSET_EXT, camera_uv_offset(cam));
+            ATTR(EGL_DMA_BUF_PLANE1_PITCH_EXT, stride);
+        }
+        if (nv12) { /* the colorimetry hints: which YUV->RGB matrix the sampler applies */
+            ATTR(EGL_YUV_COLOR_SPACE_HINT_EXT,
+                 camera_is_bt709(cam) ? EGL_ITU_REC709_EXT : EGL_ITU_REC601_EXT);
+            ATTR(EGL_SAMPLE_RANGE_HINT_EXT,
+                 camera_is_full_range(cam) ? EGL_YUV_FULL_RANGE_EXT : EGL_YUV_NARROW_RANGE_EXT);
+        }
+        ATTR(EGL_NONE, 0);
+#undef ATTR
         s->images[i] =
             eglCreateImage(p->egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attrs);
         if (s->images[i] == EGL_NO_IMAGE) {
             fprintf(stderr,
-                    "cam_gles: eglCreateImage(NV12) failed, EGL error 0x%x\n",
+                    "cam_gles: eglCreateImage(%s) failed, EGL error 0x%x\n",
+                    nv12 ? "NV12" : "YUYV as RGBA",
                     eglGetError());
             exit(1);
         }
+        /* YUYV: nearest, so a fetch lands on exactly one (Y0,U,Y1,V)
+         * texel and the parity pick in cam_sample() is well-defined */
+        const GLint filter = nv12 ? GL_LINEAR : GL_NEAREST;
         glGenTextures(1, &s->textures[i]);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, s->textures[i]);
         s->image_target_tex(GL_TEXTURE_EXTERNAL_OES, s->images[i]);
-        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, filter);
         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
-    fprintf(stderr, "cam_gles: %u camera buffers imported as external textures\n", cam->buf_count);
+    fprintf(stderr,
+            "cam_gles: %u camera buffers imported as external textures (%s)\n",
+            cam->buf_count,
+            nv12 ? "NV12, sampler converts" : "YUYV as half-width RGBA, shader converts");
 }
 
 /* Two ordinary RGBA textures we can both render into (FBO) and sample
@@ -367,6 +419,7 @@ static void cam_init(struct gles_presenter* p, void* user) {
     if (cam_stream_open(&s->stream, &egl_fence_ops, p) < 0) { exit(1); }
     s->cw = s->stream.cam.format.width;
     s->ch = s->stream.cam.format.height;
+    s->yuyv = s->stream.cam.format.pixelformat == V4L2_PIX_FMT_YUYV;
 
     build_programs(s);
     import_camera_buffers(p, s);

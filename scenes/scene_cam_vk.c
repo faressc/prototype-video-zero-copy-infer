@@ -7,12 +7,13 @@
  *   VkExternalMemoryImageCreateInfo + VkImageDrmFormatModifierExplicit-
  *   CreateInfoEXT describe the layout (linear, two planes at the
  *   offsets V4L2 reported), VkImportMemoryFdInfoKHR wraps the fd. The
- *   format is the 2-plane NV12 format and a VkSamplerYcbcrConversion
- *   does YUV->RGB inside the sampler -- the shader sees a sampler2D.
+ *   format is the 2-plane NV12 format (or the packed 4:2:2 one for a
+ *   YUYV webcam) and a VkSamplerYcbcrConversion does YUV->RGB inside
+ *   the sampler -- the shader sees a sampler2D.
  *   Ownership is passed with queue-family barriers to/from
  *   VK_QUEUE_FAMILY_FOREIGN_EXT ("not a Vulkan queue": the ISP).
  *
- *   FALLBACK (staging). The CPU converts NV12 -> RGBA into a
+ *   FALLBACK (staging). The CPU converts NV12/YUYV -> RGBA into a
  *   host-visible buffer, vkCmdCopyBufferToImage moves it into a
  *   device-local image. The classic upload path every texture takes.
  *
@@ -223,8 +224,14 @@ static void image_barrier(VkCommandBuffer cmd,
 
 static int import_dmabufs(struct vk_presenter* p, struct cam_scene* s) {
     const struct camera* cam = &s->stream.cam;
-    if (cam->format.pixelformat != V4L2_PIX_FMT_NV12) { return -1; }
-    const VkFormat fmt = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM; /* NV12 */
+    /* NV12 is the 2-plane 4:2:0 format. YUYV (UVC webcams) is the
+     * single-plane packed 4:2:2 one: G8B8G8R8 in Vulkan's naming = the
+     * byte order Y0 U Y1 V. Both go through the same Ycbcr conversion,
+     * so the shaders never learn which it was. */
+    const int nv12 = cam->format.pixelformat == V4L2_PIX_FMT_NV12;
+    if (!nv12 && cam->format.pixelformat != V4L2_PIX_FMT_YUYV) { return -1; }
+    const VkFormat fmt = nv12 ? VK_FORMAT_G8_B8R8_2PLANE_420_UNORM : VK_FORMAT_G8B8G8R8_422_UNORM;
+    const char* fmt_name = nv12 ? "NV12" : "YUYV";
 
     s->get_fd_props =
         (PFN_vkGetMemoryFdPropertiesKHR)vkGetDeviceProcAddr(p->device,
@@ -238,7 +245,7 @@ static int import_dmabufs(struct vk_presenter* p, struct cam_scene* s) {
     vkGetPhysicalDeviceFormatProperties(p->phys, fmt, &fp);
     VkFormatFeatureFlags feat = fp.linearTilingFeatures;
     if (!(feat & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) {
-        fprintf(stderr, "cam_vk: NV12 not sampleable with linear tiling\n");
+        fprintf(stderr, "cam_vk: %s not sampleable with linear tiling\n", fmt_name);
         return -1;
     }
     VkChromaLocation chroma = (feat & VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT)
@@ -273,8 +280,8 @@ static int import_dmabufs(struct vk_presenter* p, struct cam_scene* s) {
 
     for (uint32_t i = 0; i < cam->buf_count; i++) {
         /* 1. an image whose memory will come from outside, with an
-         *    explicitly described linear layout: the two planes at the
-         *    offsets/pitch V4L2 gave us */
+         *    explicitly described linear layout: the plane(s) at the
+         *    offsets/pitch V4L2 gave us (YUYV: just the one) */
         VkSubresourceLayout planes[2] = {
             {.offset = 0, .rowPitch = camera_stride(cam)},
             {.offset = camera_uv_offset(cam), .rowPitch = camera_stride(cam)},
@@ -282,7 +289,7 @@ static int import_dmabufs(struct vk_presenter* p, struct cam_scene* s) {
         VkImageDrmFormatModifierExplicitCreateInfoEXT modinfo = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
             .drmFormatModifier = DRM_FORMAT_MOD_LINEAR,
-            .drmFormatModifierPlaneCount = 2,
+            .drmFormatModifierPlaneCount = nv12 ? 2 : 1,
             .pPlaneLayouts = planes,
         };
         VkExternalMemoryImageCreateInfo extinfo = {
@@ -305,7 +312,7 @@ static int import_dmabufs(struct vk_presenter* p, struct cam_scene* s) {
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
         if (vkCreateImage(p->device, &ici, NULL, &s->cam_image[i]) != VK_SUCCESS) {
-            fprintf(stderr, "cam_vk: vkCreateImage(dmabuf NV12) failed\n");
+            fprintf(stderr, "cam_vk: vkCreateImage(dmabuf %s) failed\n", fmt_name);
             return -1;
         }
 
@@ -351,8 +358,9 @@ static int import_dmabufs(struct vk_presenter* p, struct cam_scene* s) {
     }
     s->cam_image_count = cam->buf_count;
     fprintf(stderr,
-            "cam_vk: %u camera dmabufs imported (NV12, %s, %s)\n",
+            "cam_vk: %u camera dmabufs imported (%s, %s, %s)\n",
             cam->buf_count,
+            fmt_name,
             camera_is_bt709(cam) ? "BT.709" : "BT.601",
             camera_is_full_range(cam) ? "full range" : "limited range");
     return 0;
@@ -872,16 +880,8 @@ static void cam_record(struct vk_presenter* p, const struct vk_frame* fr, void* 
     } else if (have) {
         /* staging: CPU converts into this lane's buffer, GPU copies it
          * into the sampled image */
-        const struct camera* cam = &s->stream.cam;
         const uint8_t* base = camera_map(&s->stream.cam, (uint32_t)latest);
-        nv12_to_xrgb(base,
-                     base + camera_uv_offset(cam),
-                     camera_stride(cam),
-                     s->cw,
-                     s->ch,
-                     camera_is_bt709(cam),
-                     camera_is_full_range(cam),
-                     s->rgb_scratch);
+        camera_frame_to_xrgb(&s->stream.cam, base, s->rgb_scratch);
         memcpy(s->staging_map[fr->lane], s->rgb_scratch, (size_t)s->cw * s->ch * 4);
 
         image_barrier(cmd,

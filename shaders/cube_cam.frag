@@ -3,6 +3,8 @@
  * (the push constants sit after the vertex stage's, at offset 96),
  * sampled at the mesh uv, then lit. */
 #version 450
+/* glslc enables #include implicitly; glslangValidator needs it spelled out */
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in float v_diffuse;
 layout(location = 1) in vec2 v_uv;

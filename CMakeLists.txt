@@ -132,7 +132,8 @@ if(GLSLC OR GLSLANG)
             else()
                 add_custom_command(
                     OUTPUT ${SPV}
-                    COMMAND ${GLSLANG} -V ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} -o ${SPV}
+                    COMMAND ${GLSLANG} -V -I${CMAKE_CURRENT_SOURCE_DIR}/shaders
+                            ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} -o ${SPV}
                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER} ${SHADER_INCLUDES})
             endif()
             list(APPEND SPVS ${SPV})

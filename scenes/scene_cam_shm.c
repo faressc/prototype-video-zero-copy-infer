@@ -221,8 +221,9 @@ static void on_cam_fd(struct app* a) {
 static void cam_init(struct shm_presenter* p, void* user) {
     struct cam_scene* s = user;
     if (cam_stream_open(&s->stream, &cpu_fence_ops, NULL) < 0) { exit(1); }
-    if (s->stream.cam.format.pixelformat != V4L2_PIX_FMT_NV12) {
-        fprintf(stderr, "cam_shm: only NV12 is implemented on the CPU path\n");
+    const uint32_t pf = s->stream.cam.format.pixelformat;
+    if (pf != V4L2_PIX_FMT_NV12 && pf != V4L2_PIX_FMT_YUYV) {
+        fprintf(stderr, "cam_shm: only NV12 and YUYV are implemented on the CPU path\n");
         exit(1);
     }
     s->cw = s->stream.cam.format.width;
@@ -253,15 +254,7 @@ static void cam_draw(struct shm_presenter* p, const struct shm_target* t, void* 
      * pages -- zero-copy up to here; the conversion is the copy. */
     const uint8_t* base = camera_map(&s->stream.cam, (uint32_t)latest);
     if (!base) { return; }
-    const struct camera* cam = &s->stream.cam;
-    nv12_to_xrgb(base,
-                 base + camera_uv_offset(cam),
-                 camera_stride(cam),
-                 s->cw,
-                 s->ch,
-                 camera_is_bt709(cam),
-                 camera_is_full_range(cam),
-                 s->rgb);
+    camera_frame_to_xrgb(&s->stream.cam, base, s->rgb);
     cam_stream_rendered(&s->stream, latest, NULL); /* CPU: done reading already */
 
     /* the chain: each pass reads the previous stage, writes the other
