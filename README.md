@@ -518,39 +518,76 @@ INFER_ORT_OPTS=enableGraphCapture=0 build/hello_inference --src wgpu --ep webgpu
 
 We own Dawn; ORT consumes it. That is the arrangement a library like anira needs (one device shared by the renderer, the edges and every engine), and it is the only ORT build mode in which ORT is a *consumer* of a `WGPUDevice` rather than its provider. The price is a **revision lock**: `DawnProcTable` is a plain struct of ~280 function pointers whose order changes between Dawn revisions, and a `WGPUDevice` is a C++ object of one build — so Dawn and ORT must be built from the *same* Dawn source tree, and that tree must be the revision ORT's `cmake/deps.txt` pins for the ORT tag in use. ORT 1.29.0 pins `v20260714.215939`; a Dawn one month newer (`v20260817`) fails ORT's compile (`ConvertibleStatus` was removed upstream: `invalid argument type 'Status' to unary expression` in `webgpu_context.cc`). Find the pin with `git show v1.29.0:cmake/deps.txt | grep dawn`.
 
-```sh
-# 1. Dawn source at the pinned tag, dependencies pinned to that tag's DEPS
-cd ~/self-builds/dawn && git fetch --tags origin && git checkout v20260714.215939
-python3 tools/fetch_dawn_dependencies.py            # see the caveat below
+From nothing to a running `hello_inference`. The order matters: the Dawn tag is *read out of* ORT's tree, so ORT is cloned first even though Dawn is built first. [infer/build-deps.sh](infer/build-deps.sh) is these steps as one idempotent script — `./infer/build-deps.sh` runs all of them, `./infer/build-deps.sh audit` re-checks only Dawn's dependencies, `./infer/build-deps.sh dawn ort app` skips the source steps; `ORT_TAG`, `DAWN_TAG`, `{ORT,DAWN}_{SRC,ROOT}` and `{ORT,DAWN}_JOBS` override the defaults. What it does, spelled out:
 
-# 2. Dawn: monolithic shared library, installed
-rm -rf out/Release ~/opt/dawn
+```sh
+# 0. host tools: git, clang, cmake, ninja, python3 (plus the repo's own
+#    deps for step 5: wayland/egl/glesv2/gbm/libdrm/vulkan + glslc)
+mkdir -p ~/self-builds ~/opt
+export DAWN_SRC=$HOME/self-builds/dawn ORT_SRC=$HOME/self-builds/onnxruntime
+export DAWN_ROOT=$HOME/opt/dawn ORT_ROOT=$HOME/opt/onnxruntime-webgpu-extdawn
+
+# 1. onnxruntime first: its cmake/deps.txt is what pins the Dawn revision.
+#    A real git clone, not a tarball -- build.py inits cmake/external/onnx
+#    and the other submodules itself unless --skip_submodule_sync.
+git clone https://github.com/microsoft/onnxruntime.git $ORT_SRC
+cd $ORT_SRC && git checkout v1.29.0
+python3 -m pip install -r requirements.txt setuptools wheel
+DAWN_TAG=$(git show v1.29.0:cmake/deps.txt | sed -n 's#.*dawn/archive/refs/tags/\(v[0-9.]*\)\.zip.*#\1#p')
+echo "ORT 1.29.0 pins Dawn $DAWN_TAG"        # -> v20260714.215939
+
+# 2. Dawn source at that tag -- a FULL clone: the tag checkout and the
+#    DEPS audit below both need history.
+git clone https://dawn.googlesource.com/dawn $DAWN_SRC
+cd $DAWN_SRC && git checkout $DAWN_TAG
+python3 tools/fetch_dawn_dependencies.py
+
+# 2b. audit what the script actually checked out (see the caveat below --
+#     stale dependencies fail silently here and only bite in step 4)
+grep -o "third_party/[a-z0-9_-]*'*: *'[^@]*@[0-9a-f]\{40\}" DEPS | while read -r line; do
+    d=${line%%\'*}; sha=${line##*@}
+    [ -d "$d/.git" ] || continue
+    have=$(git -C "$d" rev-parse HEAD)
+    [ "$have" = "$sha" ] || echo "STALE $d: have $have want $sha"
+done
+# for every STALE line: git -C <dir> fetch --depth 1 <github or chromium url> <sha>
+#                       git -C <dir> checkout --detach <sha>
+
+# 3. Dawn: monolithic shared library, installed
+rm -rf out/Release $DAWN_ROOT
 cmake -S . -B out/Release -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
       -DDAWN_BUILD_MONOLITHIC_LIBRARY=SHARED -DDAWN_ENABLE_INSTALL=ON -DDAWN_FETCH_DEPENDENCIES=OFF \
       -DDAWN_ENABLE_VULKAN=ON -DDAWN_USE_WAYLAND=ON -DDAWN_USE_X11=OFF -DDAWN_ENABLE_RTTI=ON \
       -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF -DTINT_BUILD_TESTS=OFF \
       -DTINT_BUILD_CMD_TOOLS=OFF -DTINT_BUILD_SPV_READER=OFF \
-      -DCMAKE_INSTALL_PREFIX=$HOME/opt/dawn
+      -DCMAKE_INSTALL_PREFIX=$DAWN_ROOT
 cmake --build out/Release && cmake --install out/Release
 
-# 3. onnxruntime: external Dawn, headers + dawn_proc from the same tree
-cd ~/self-builds/onnxruntime && git checkout v1.29.0 && rm -rf build-webgpu-extdawn
+# 4. onnxruntime: external Dawn, headers + dawn_proc from the same tree
+cd $ORT_SRC && rm -rf build-webgpu-extdawn
 CC=clang CXX=clang++ ./build.sh --config Release --build_dir build-webgpu-extdawn \
   --build_shared_lib --use_webgpu --use_external_dawn --parallel 4 --skip_tests \
   --compile_no_warning_as_error --cmake_generator Ninja \
-  --cmake_extra_defines onnxruntime_CUSTOM_DAWN_SRC_PATH=$HOME/self-builds/dawn \
+  --cmake_extra_defines onnxruntime_CUSTOM_DAWN_SRC_PATH=$DAWN_SRC \
                         onnxruntime_BUILD_UNIT_TESTS=OFF \
-                        CMAKE_INSTALL_PREFIX=$HOME/opt/onnxruntime-webgpu-extdawn
+                        CMAKE_INSTALL_PREFIX=$ORT_ROOT
 cmake --install build-webgpu-extdawn/Release
 
-# 4. this repo
-cmake -B build -G Ninja -DORT_ROOT=$HOME/opt/onnxruntime-webgpu-extdawn -DDAWN_ROOT=$HOME/opt/dawn
+# 4b. ORT must carry no Dawn of its own and export no wgpu symbols
+readelf -d $ORT_ROOT/lib64/libonnxruntime.so | grep NEEDED | grep webgpu_dawn && echo "BAD: own Dawn"
+test "$(nm -D --defined-only $ORT_ROOT/lib64/libonnxruntime.so | grep -c ' wgpu')" = 0 || echo "BAD: exported thunks"
+
+# 5. this repo
+cd ~/concepts/simple-wayland-window
+cmake -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+      -DORT_ROOT=$ORT_ROOT -DDAWN_ROOT=$DAWN_ROOT
 cmake --build build --clean-first --target hello_inference
+ctest --test-dir build -R infer_
 ```
 
-Checks after step 3: `readelf -d $ORT_ROOT/lib64/libonnxruntime.so | grep NEEDED` must not list `libwebgpu_dawn.so`, and `nm -D --defined-only libonnxruntime.so | grep -c ' wgpu'` must be 0 (ORT's version script hides the thunks, so they cannot interpose on ours). ORT's `find_package(dawn)` path is disabled upstream (`if (FALSE)`), so `CUSTOM_DAWN_SRC_PATH` is the only way to point it at a tree; ORT forces `DAWN_FETCH_DEPENDENCIES=OFF` for that tree and skips its own Dawn patches (all wasm/BinSkim-only, irrelevant natively).
+Why step 4b: ORT's version script hides the `dawn_proc` thunks, so they cannot interpose on ours — if either check fires, two Dawns are in the process and the device cannot be shared. ORT's `find_package(dawn)` path is disabled upstream (`if (FALSE)`), so `CUSTOM_DAWN_SRC_PATH` is the only way to point it at a tree; ORT forces `DAWN_FETCH_DEPENDENCIES=OFF` for that tree and skips its own Dawn patches (all wasm/BinSkim-only, irrelevant natively). The install lands in `lib64` on Fedora; [CMakeLists.txt](CMakeLists.txt) probes `lib64` then `lib`, and bakes both lib dirs into `hello_inference`'s `BUILD_RPATH`, so no `LD_LIBRARY_PATH` is needed to run it.
 
-Caveat on step 1: `fetch_dawn_dependencies.py` updates existing shallow clones in place with `git fetch origin <sha> --depth 1`, and the googlesource mirrors refuse that for commits older than the clone's tip — the script prints "Checking out tag …" and leaves the dependency where it was. After switching tags, verify every `third_party/*` against `DEPS` (`git -C third_party/X rev-parse HEAD` vs the `@sha` in `DEPS`); the fix that worked was fetching each pinned commit from the GitHub origin instead (`git -C third_party/X fetch --depth 1 https://github.com/<org>/<repo> <sha> && git -C third_party/X checkout --detach <sha>`; `abseil-cpp` and `protobuf` come from `chromium.googlesource.com/chromium/src/third_party/…` and accept the fetch). Building with stale deps produces a Dawn whose generated headers do not match ORT's — the failure above.
+Caveat on step 2: `fetch_dawn_dependencies.py` updates existing shallow clones in place with `git fetch origin <sha> --depth 1`, and the googlesource mirrors refuse that for commits older than the clone's tip — the script prints "Checking out tag …" and leaves the dependency where it was. That is what step 2b's loop catches (`git -C third_party/X rev-parse HEAD` vs the `@sha` in `DEPS`); the fix that worked was fetching each pinned commit from the GitHub origin instead (`git -C third_party/X fetch --depth 1 https://github.com/<org>/<repo> <sha> && git -C third_party/X checkout --detach <sha>`; `abseil-cpp` and `protobuf` come from `chromium.googlesource.com/chromium/src/third_party/…` and accept the fetch). Building with stale deps produces a Dawn whose generated headers do not match ORT's — the failure above.
 
-Upgrading later means: pick the ORT tag, read its Dawn pin, redo steps 1–3, then `cmake --build build --clean-first` here (the example compiles against `DAWN_ROOT/include`). Never the other way round — a newer Dawn under an older ORT is an untested triple. `dawn/dawn_version.h` in the install carries the revision hash; a library that consumes the proc table should compare it against the one it was built with and refuse a mismatch at startup.
+Upgrading later means: pick the ORT tag, read its Dawn pin, redo steps 1–4, then `cmake --build build --clean-first` here (the example compiles against `DAWN_ROOT/include`). Never the other way round — a newer Dawn under an older ORT is an untested triple. `dawn/dawn_version.h` in the install carries the revision hash; a library that consumes the proc table should compare it against the one it was built with and refuse a mismatch at startup.
