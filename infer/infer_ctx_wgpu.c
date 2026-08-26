@@ -1,7 +1,9 @@
 /* infer_ctx_wgpu.c -- the WebGPU domain on Dawn: the one device this
  * process shares with ONNX Runtime's WebGPU EP, the generator pass, the
- * MapRead readback, and the dma-buf import + relayout that is the
- * DEVICE_COPY edge from OpenGL/Vulkan tensors.
+ * MapRead readback, and the dma-buf import that is the DEVICE_COPY edge
+ * in both directions: a foreign byte image read into a packed float
+ * buffer (an input), or a packed float buffer written into a foreign
+ * byte image (an output a consumer owns).
  *
  * Dawn's C API is future-based: every asynchronous call returns a
  * WGPUFuture and we block on it with wgpuInstanceWaitAny (the instance
@@ -22,6 +24,7 @@
 #include "infer_util.h"
 #include "infer_gen_wgsl.h"
 #include "infer_relayout_wgsl.h"
+#include "infer_relayout_rev_wgsl.h"
 
 #define SV(s) (WGPUStringView){(s), WGPU_STRLEN}
 #define SV_ARGS(s) \
@@ -115,7 +118,7 @@ static WGPUComputePipeline make_pipeline(struct infer_ctx_wgpu* c, const char* w
 WGPUBuffer infer_wgpu_create_buffer(struct infer_ctx_wgpu* c, uint64_t bytes, WGPUBufferUsage extra) {
     WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
     bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst | extra;
-    bd.size = infer_align((size_t)bytes, 4);
+    bd.size = infer_align((size_t)bytes, 16);
     return wgpuDeviceCreateBuffer(c->device, &bd);
 }
 
@@ -129,7 +132,9 @@ static int setup_common(struct infer_ctx_wgpu* c) {
     c->has_sync_fd = wgpuDeviceHasFeature(c->device, WGPUFeatureName_SharedFenceSyncFD);
     c->gen_pipeline = make_pipeline(c, infer_gen_wgsl, "infer_gen");
     c->relayout_pipeline = make_pipeline(c, infer_relayout_wgsl, "infer_relayout");
-    INFER_CHECK(c->gen_pipeline && c->relayout_pipeline, "wgpu: pipeline creation failed");
+    c->relayout_rev_pipeline = make_pipeline(c, infer_relayout_rev_wgsl, "infer_relayout_rev");
+    INFER_CHECK(c->gen_pipeline && c->relayout_pipeline && c->relayout_rev_pipeline,
+                "wgpu: pipeline creation failed");
     return 0;
 }
 
@@ -206,6 +211,7 @@ int infer_ctx_wgpu_borrow(struct infer_ctx_wgpu* c, WGPUInstance instance, WGPUD
 void infer_ctx_wgpu_fini(struct infer_ctx_wgpu* c) {
     if (c->gen_pipeline) { wgpuComputePipelineRelease(c->gen_pipeline); }
     if (c->relayout_pipeline) { wgpuComputePipelineRelease(c->relayout_pipeline); }
+    if (c->relayout_rev_pipeline) { wgpuComputePipelineRelease(c->relayout_rev_pipeline); }
     if (c->queue) { wgpuQueueRelease(c->queue); }
     if (c->device) { wgpuDeviceRelease(c->device); }
     if (c->adapter) { wgpuAdapterRelease(c->adapter); }
@@ -214,8 +220,21 @@ void infer_ctx_wgpu_fini(struct infer_ctx_wgpu* c) {
 }
 
 /* ------------------------------------------------------------------ */
-/* producer + readback                                                */
+/* the tensor: a packed float buffer on the shared device              */
 /* ------------------------------------------------------------------ */
+
+int infer_wgpu_alloc(struct infer_ctx_wgpu* c, const struct infer_desc* d, struct infer_tensor* t) {
+    if (t->mem.wgpu.buffer) { return 0; }
+    t->domain = INFER_DOMAIN_WGPU;
+    t->desc = *d;
+    t->desc.row_pitch_bytes = d->img_w * 4; /* packed */
+    t->owned = 1;
+    t->ready.sync_fd = -1;
+    t->released.sync_fd = -1;
+    t->mem.wgpu.buffer = infer_wgpu_create_buffer(c, infer_desc_bytes_packed(d), 0);
+    INFER_CHECK(t->mem.wgpu.buffer, "wgpu: buffer creation failed");
+    return 0;
+}
 
 int infer_wgpu_gen(struct infer_ctx_wgpu* c,
                    const struct infer_desc* d,
@@ -228,13 +247,8 @@ int infer_wgpu_gen(struct infer_ctx_wgpu* c,
      * healthy device. Only errors raised between here and the return
      * belong to this call. */
     int errors0 = c->errors;
-    if (!t->mem.wgpu.buffer) {
-        t->domain = INFER_DOMAIN_WGPU;
-        t->desc = *d;
-        t->owned = 1;
-        t->ready.sync_fd = -1;
-        t->released.sync_fd = -1;
-        t->mem.wgpu.buffer = infer_wgpu_create_buffer(c, n * sizeof(float), 0);
+    if (infer_wgpu_alloc(c, d, t) < 0) { return -1; }
+    if (!t->mem.wgpu.bind_group) {
         WGPUBufferDescriptor ud = WGPU_BUFFER_DESCRIPTOR_INIT;
         ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
         ud.size = 16;
@@ -250,8 +264,7 @@ int infer_wgpu_gen(struct infer_ctx_wgpu* c,
         bgd.entries = entries;
         t->mem.wgpu.bind_group = wgpuDeviceCreateBindGroup(c->device, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
-        INFER_CHECK(t->mem.wgpu.buffer && t->mem.wgpu.uniform && t->mem.wgpu.bind_group,
-                    "wgpu: generator resources");
+        INFER_CHECK(t->mem.wgpu.uniform && t->mem.wgpu.bind_group, "wgpu: generator resources");
     }
     uint32_t params[4] = {(uint32_t)n, 0, 0, seed};
     wgpuQueueWriteBuffer(c->queue, t->mem.wgpu.uniform, 0, params, sizeof params);
@@ -309,7 +322,7 @@ void infer_wgpu_release(struct infer_ctx_wgpu* c, struct infer_tensor* t) {
 }
 
 /* ------------------------------------------------------------------ */
-/* dma-buf import + relayout (the DEVICE_COPY edge body)              */
+/* dma-buf import + relayout (the DEVICE_COPY edge body, both ways)   */
 /* ------------------------------------------------------------------ */
 
 struct infer_wgpu_import {
@@ -319,13 +332,17 @@ struct infer_wgpu_import {
     WGPUTextureView view;
     WGPUBuffer uniform;
     WGPUBindGroup bg;
-    WGPUBuffer bg_dst; /* which dst the bind group was built for */
+    WGPUBuffer bg_buf; /* which buffer / pass the bind group was built for */
+    int bg_pass;
+    int writable;
+    int layout; /* VkImageLayout the image is in when we next acquire it */
     uint32_t img_w, img_h;
 };
 
 struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
                                                    int dmabuf_fd,
-                                                   const struct infer_desc* d) {
+                                                   const struct infer_desc* d,
+                                                   int writable) {
     if (!c->has_dmabuf) {
         fprintf(stderr, "wgpu: SharedTextureMemoryDmaBuf unavailable\n");
         return NULL;
@@ -335,6 +352,12 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
     im->c = c;
     im->img_w = d->img_w;
     im->img_h = d->img_h;
+    im->writable = writable;
+    im->bg_pass = -1;
+    /* an input's image is in whatever layout its producer released it
+     * in (GENERAL, by the Vulkan writer's barrier); an output's has
+     * never been used by anyone and its contents are irrelevant */
+    im->layout = writable ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL;
 
     WGPUSharedTextureMemoryDmaBufPlane planes[4];
     for (uint32_t p = 0; p < d->planes && p < 4; p++) {
@@ -343,12 +366,12 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
     WGPUSharedTextureMemoryDmaBufDescriptor dma = WGPU_SHARED_TEXTURE_MEMORY_DMA_BUF_DESCRIPTOR_INIT;
     dma.size = (WGPUExtent3D){d->img_w, d->img_h, 1};
     dma.drmFormat = DRM_FORMAT_ABGR8888; /* byte 0 = R: a float's bytes in texel order */
-    dma.drmModifier = d->drm_modifier;   /* whatever the producer's allocator chose */
+    dma.drmModifier = d->drm_modifier;   /* whatever the owner's allocator chose */
     dma.planeCount = d->planes;
     dma.planes = planes;
     WGPUSharedTextureMemoryDescriptor sd = WGPU_SHARED_TEXTURE_MEMORY_DESCRIPTOR_INIT;
     sd.nextInChain = &dma.chain;
-    sd.label = SV("infer dma-buf tensor");
+    sd.label = SV(writable ? "infer dma-buf output" : "infer dma-buf input");
     im->mem = wgpuDeviceImportSharedTextureMemory(c->device, &sd);
     WGPUSharedTextureMemoryProperties props = WGPU_SHARED_TEXTURE_MEMORY_PROPERTIES_INIT;
     if (!im->mem || wgpuSharedTextureMemoryGetProperties(im->mem, &props) != WGPUStatus_Success ||
@@ -357,8 +380,20 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
         infer_wgpu_import_destroy(im);
         return NULL;
     }
+    /* read: sampled by the relayout pass; write: stored by the reverse
+     * pass (rgba8unorm is a core storage format) */
+    WGPUTextureUsage want = writable ? (WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopyDst)
+                                     : (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc);
+    if ((props.usage & want) != want) {
+        fprintf(stderr,
+                "wgpu: dma-buf import does not allow %s (usage 0x%llx)\n",
+                writable ? "storage writes" : "texture reads",
+                (unsigned long long)props.usage);
+        infer_wgpu_import_destroy(im);
+        return NULL;
+    }
     WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    td.usage = props.usage & (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc);
+    td.usage = want;
     td.size = props.size;
     td.format = props.format;
     im->tex = wgpuSharedTextureMemoryCreateTexture(im->mem, &td);
@@ -368,7 +403,7 @@ struct infer_wgpu_import* infer_wgpu_import_create(struct infer_ctx_wgpu* c,
     ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     ud.size = 16;
     im->uniform = wgpuDeviceCreateBuffer(c->device, &ud);
-    uint32_t params[4] = {d->img_w, d->img_h, 0, 0};
+    uint32_t params[4] = {d->img_w, d->img_h, (uint32_t)infer_desc_elements(d), 0};
     wgpuQueueWriteBuffer(c->queue, im->uniform, 0, params, sizeof params);
     if (c->errors != errors0) {
         infer_wgpu_import_destroy(im);
@@ -385,31 +420,43 @@ static int export_fence_fd(WGPUSharedFence f) {
     return info.type == WGPUSharedFenceType_SyncFD && sfd.handle >= 0 ? dup(sfd.handle) : -1;
 }
 
-int infer_wgpu_import_relayout(struct infer_ctx_wgpu* c,
-                               struct infer_wgpu_import* im,
-                               int acquire_fd,
-                               WGPUBuffer dst,
-                               int* release_fd) {
+int infer_wgpu_import_access(struct infer_ctx_wgpu* c,
+                             struct infer_wgpu_import* im,
+                             int acquire_fd,
+                             enum infer_wgpu_pass pass,
+                             WGPUBuffer buf,
+                             int* release_fd) {
     *release_fd = -1;
     int errors0 = c->errors;
-    if (im->bg_dst != dst) {
+    INFER_CHECK((pass == INFER_WGPU_BUF_TO_TEX) == (im->writable != 0),
+                "wgpu: import was created for the other direction");
+    if (im->bg_buf != buf || im->bg_pass != (int)pass) {
         if (im->bg) { wgpuBindGroupRelease(im->bg); }
+        /* the two passes bind the same three things -- the image, the
+         * packed buffer, the size -- and differ only in who reads whom */
+        WGPUComputePipeline pl = pass == INFER_WGPU_TEX_TO_BUF ? c->relayout_pipeline
+                                                                : c->relayout_rev_pipeline;
+        /* the packed buffer holds the elements, the image may hold more
+         * texels: bind the buffer whole, the shaders guard on the count */
         WGPUBindGroupEntry entries[3] = {
             {.binding = 0, .textureView = im->view},
-            {.binding = 1, .buffer = dst, .size = (uint64_t)im->img_w * im->img_h * 4},
+            {.binding = 1, .buffer = buf, .size = WGPU_WHOLE_SIZE},
             {.binding = 2, .buffer = im->uniform, .size = 16},
         };
-        WGPUBindGroupLayout bgl = wgpuComputePipelineGetBindGroupLayout(c->relayout_pipeline, 0);
+        WGPUBindGroupLayout bgl = wgpuComputePipelineGetBindGroupLayout(pl, 0);
         WGPUBindGroupDescriptor bgd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
         bgd.layout = bgl;
         bgd.entryCount = 3;
         bgd.entries = entries;
         im->bg = wgpuDeviceCreateBindGroup(c->device, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
-        im->bg_dst = dst;
+        im->bg_buf = buf;
+        im->bg_pass = (int)pass;
     }
 
-    /* acquire: the producer's completion as a SharedFence (Dawn dups the fd) */
+    /* acquire: the fence that gates our access -- the producer's "data
+     * valid" for an input, the consumer's "done reading" for an output
+     * -- as a SharedFence (Dawn dups the fd) */
     WGPUSharedFence fence = NULL;
     uint64_t one = 1;
     if (acquire_fd >= 0 && c->has_sync_fd) {
@@ -423,12 +470,12 @@ int infer_wgpu_import_relayout(struct infer_ctx_wgpu* c,
     }
     WGPUSharedTextureMemoryVkImageLayoutBeginState bl =
         WGPU_SHARED_TEXTURE_MEMORY_VK_IMAGE_LAYOUT_BEGIN_STATE_INIT;
-    bl.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    bl.oldLayout = im->layout;
     bl.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     WGPUSharedTextureMemoryBeginAccessDescriptor ba =
         WGPU_SHARED_TEXTURE_MEMORY_BEGIN_ACCESS_DESCRIPTOR_INIT;
     ba.nextInChain = &bl.chain;
-    ba.initialized = 1;
+    ba.initialized = 1; /* an output is overwritten whole: no lazy clear wanted */
     ba.fenceCount = fence ? 1 : 0;
     ba.fences = &fence;
     ba.signaledValueCount = fence ? 1 : 0;
@@ -438,18 +485,20 @@ int infer_wgpu_import_relayout(struct infer_ctx_wgpu* c,
     INFER_CHECK(bs == WGPUStatus_Success, "wgpu: BeginAccess failed");
 
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(c->device, NULL);
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, NULL);
-    wgpuComputePassEncoderSetPipeline(pass, c->relayout_pipeline);
-    wgpuComputePassEncoderSetBindGroup(pass, 0, im->bg, 0, NULL);
-    wgpuComputePassEncoderDispatchWorkgroups(pass, (im->img_w + 15) / 16, (im->img_h + 15) / 16, 1);
-    wgpuComputePassEncoderEnd(pass);
-    wgpuComputePassEncoderRelease(pass);
+    WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(enc, NULL);
+    wgpuComputePassEncoderSetPipeline(cp, pass == INFER_WGPU_TEX_TO_BUF ? c->relayout_pipeline
+                                                                        : c->relayout_rev_pipeline);
+    wgpuComputePassEncoderSetBindGroup(cp, 0, im->bg, 0, NULL);
+    wgpuComputePassEncoderDispatchWorkgroups(cp, (im->img_w + 15) / 16, (im->img_h + 15) / 16, 1);
+    wgpuComputePassEncoderEnd(cp);
+    wgpuComputePassEncoderRelease(cp);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
     wgpuQueueSubmit(c->queue, 1, &cb);
     wgpuCommandBufferRelease(cb);
     wgpuCommandEncoderRelease(enc);
 
-    /* release: Dawn's fence for "done reading", handed back as a sync file */
+    /* release: Dawn's fence for "done with the image" -- done reading
+     * an input, done writing an output -- handed back as a sync file */
     WGPUSharedTextureMemoryVkImageLayoutEndState el =
         WGPU_SHARED_TEXTURE_MEMORY_VK_IMAGE_LAYOUT_END_STATE_INIT;
     WGPUSharedTextureMemoryEndAccessState ea = WGPU_SHARED_TEXTURE_MEMORY_END_ACCESS_STATE_INIT;
@@ -458,6 +507,9 @@ int infer_wgpu_import_relayout(struct infer_ctx_wgpu* c,
     if (es == WGPUStatus_Success && ea.fenceCount > 0) { *release_fd = export_fence_fd(ea.fences[0]); }
     wgpuSharedTextureMemoryEndAccessStateFreeMembers(ea);
     INFER_CHECK(es == WGPUStatus_Success, "wgpu: EndAccess failed");
+    /* an output image is ours alone between accesses: remember the
+     * layout Dawn left it in. An input's producer re-transitions it. */
+    if (im->writable) { im->layout = el.newLayout ? el.newLayout : VK_IMAGE_LAYOUT_GENERAL; }
     if (getenv("INFER_WGPU_TRACE") && *release_fd >= 0) {
         /* how long after EndAccess does Dawn's release fence signal? */
         uint64_t w0 = infer_now_ns();

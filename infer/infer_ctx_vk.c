@@ -296,8 +296,8 @@ static int alloc_tensor(struct infer_ctx_vk* c, const struct infer_desc* d, stru
     INFER_CHECK(c->has_dmabuf_export && c->has_drm_modifier, "vk: dma-buf export unavailable");
     struct infer_mem_vk* m = &t->mem.vk;
     struct vk_tensor_extra* x = calloc(1, sizeof *x);
-    t->edge_state = x; /* reuse the slot: a VK tensor is never an edge destination */
-    t->edge_state_free = free;
+    t->priv = x;
+    t->priv_free = free;
 
     /* 1. can the driver make a linear, exportable RGBA8 image, and with
      *    storage usage (for the fallback writer)? */
@@ -495,6 +495,7 @@ static int alloc_tensor(struct infer_ctx_vk* c, const struct infer_desc* d, stru
     VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VK_CHECK(vkCreateFence(c->device, &fci, NULL, &m->fence));
 
+    if (!infer_verbose) { return 0; }
     fprintf(stderr,
             "vk: tensor %ux%u pitch %u, writer = %s, memory %s"
             " (type %u flags 0x%x, heap %u flags 0x%x, %.0f MiB)\n",
@@ -512,13 +513,17 @@ static int alloc_tensor(struct infer_ctx_vk* c, const struct infer_desc* d, stru
     return 0;
 }
 
+int infer_vk_alloc(struct infer_ctx_vk* c, const struct infer_desc* d, struct infer_tensor* t) {
+    return t->mem.vk.memory ? 0 : alloc_tensor(c, d, t);
+}
+
 int infer_vk_gen(struct infer_ctx_vk* c,
                  const struct infer_desc* d,
                  uint32_t seed,
                  struct infer_tensor* t) {
-    if (!t->mem.vk.memory && alloc_tensor(c, d, t) < 0) { return -1; }
+    if (infer_vk_alloc(c, d, t) < 0) { return -1; }
     struct infer_mem_vk* m = &t->mem.vk;
-    struct vk_tensor_extra* x = t->edge_state;
+    struct vk_tensor_extra* x = t->priv;
 
     /* the consumer's fence -> a semaphore this submit waits on */
     VkSemaphore wait_sem = VK_NULL_HANDLE;
@@ -632,17 +637,48 @@ int infer_vk_gen(struct infer_ctx_vk* c,
     return 0;
 }
 
+static int host_coherent(const struct infer_ctx_vk* c, const struct infer_mem_vk* m) {
+    return (c->mem_props.memoryTypes[m->mem_type].propertyFlags &
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+}
+
+/* image rows (pitch apart) <-> packed floats; the image's last row may
+ * hold more texels than there are elements left */
+static void rows_out(float* dst, const void* img, uint32_t pitch, const struct infer_desc* d) {
+    size_t n = infer_desc_elements(d);
+    for (size_t y = 0; y * d->img_w < n; y++) {
+        size_t cnt = n - y * d->img_w < d->img_w ? n - y * d->img_w : d->img_w;
+        memcpy(dst + y * d->img_w, (const char*)img + y * pitch, cnt * 4);
+    }
+}
+static void rows_in(void* img, const float* src, uint32_t pitch, const struct infer_desc* d) {
+    size_t n = infer_desc_elements(d);
+    for (size_t y = 0; y * d->img_w < n; y++) {
+        size_t cnt = n - y * d->img_w < d->img_w ? n - y * d->img_w : d->img_w;
+        memcpy((char*)img + y * pitch, src + y * d->img_w, cnt * 4);
+    }
+}
+
 int infer_vk_readback(struct infer_ctx_vk* c, const struct infer_tensor* t, float* dst) {
     const struct infer_mem_vk* m = &t->mem.vk;
-    VK_CHECK(vkWaitForFences(c->device, 1, &m->fence, VK_TRUE, UINT64_MAX));
+    /* whoever wrote it last: a foreign writer (Dawn) whose fence is the
+     * sync file on `ready`, or our own generator (its fence; never
+     * submitted if nobody generated into this tensor) */
+    if (t->ready.sync_fd >= 0) {
+        INFER_CHECK(infer_wait_sync_fd(t->ready.sync_fd, 2000) == 0, "vk: ready fence timed out");
+    }
+    if (!m->first_write) { VK_CHECK(vkWaitForFences(c->device, 1, &m->fence, VK_TRUE, UINT64_MAX)); }
     uint32_t pitch = t->desc.row_pitch_bytes;
     if (m->host_visible) {
         void* p = NULL;
         VK_CHECK(vkMapMemory(c->device, m->memory, 0, VK_WHOLE_SIZE, 0, &p));
-        for (uint32_t y = 0; y < t->desc.img_h; y++) {
-            memcpy(dst + (size_t)y * t->desc.img_w, (const char*)p + (size_t)y * pitch,
-                   (size_t)t->desc.img_w * 4);
+        if (!host_coherent(c, m)) {
+            VkMappedMemoryRange r = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                                     .memory = m->memory,
+                                     .size = VK_WHOLE_SIZE};
+            VK_CHECK(vkInvalidateMappedMemoryRanges(c->device, 1, &r));
         }
+        rows_out(dst, p, pitch, &t->desc);
         vkUnmapMemory(c->device, m->memory);
         return 0;
     }
@@ -683,13 +719,99 @@ int infer_vk_readback(struct infer_ctx_vk* c, const struct infer_tensor* t, floa
     VK_CHECK(vkQueueWaitIdle(c->queue));
     void* p = NULL;
     VK_CHECK(vkMapMemory(c->device, smem, 0, VK_WHOLE_SIZE, 0, &p));
-    for (uint32_t y = 0; y < t->desc.img_h; y++) {
-        memcpy(dst + (size_t)y * t->desc.img_w, (const char*)p + (size_t)y * pitch,
-               (size_t)t->desc.img_w * 4);
-    }
+    rows_out(dst, p, pitch, &t->desc);
     vkUnmapMemory(c->device, smem);
     vkDestroyBuffer(c->device, staging, NULL);
     vkFreeMemory(c->device, smem, NULL);
+    return 0;
+}
+
+/* Host floats into the exportable memory (an output a Vulkan consumer
+ * owns, produced by the CPU engine): a map when the memory is host-
+ * visible, a staging copy when it is device-local. */
+int infer_vk_upload(struct infer_ctx_vk* c, const float* src, struct infer_tensor* t) {
+    struct infer_mem_vk* m = &t->mem.vk;
+    uint32_t pitch = t->desc.row_pitch_bytes;
+    uint32_t w = t->desc.img_w, h = t->desc.img_h;
+    /* our own writer may still be running, and a foreign reader may
+     * still be reading (honoured on the host here; infer_vk_gen does it
+     * on the GPU timeline) */
+    if (!m->first_write) { VK_CHECK(vkWaitForFences(c->device, 1, &m->fence, VK_TRUE, UINT64_MAX)); }
+    if (t->released.sync_fd >= 0) {
+        infer_wait_sync_fd(t->released.sync_fd, 1000);
+        infer_sync_reset(&t->released);
+    }
+    if (m->host_visible) {
+        void* p = NULL;
+        VK_CHECK(vkMapMemory(c->device, m->memory, 0, VK_WHOLE_SIZE, 0, &p));
+        rows_in(p, src, pitch, &t->desc);
+        if (!host_coherent(c, m)) {
+            VkMappedMemoryRange r = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+                                     .memory = m->memory,
+                                     .size = VK_WHOLE_SIZE};
+            VK_CHECK(vkFlushMappedMemoryRanges(c->device, 1, &r));
+        }
+        vkUnmapMemory(c->device, m->memory);
+        infer_sync_set(&t->ready, -1); /* host writes are complete on return */
+        return 0;
+    }
+    /* device-local: stage through host-visible memory */
+    VkDeviceSize bytes = (VkDeviceSize)pitch * h;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                              .size = bytes,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    VkBuffer staging;
+    VK_CHECK(vkCreateBuffer(c->device, &bci, NULL, &staging));
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(c->device, staging, &req);
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = req.size,
+        .memoryTypeIndex = find_memory_type(
+            c, req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+    };
+    VkDeviceMemory smem;
+    VK_CHECK(vkAllocateMemory(c->device, &mai, NULL, &smem));
+    VK_CHECK(vkBindBufferMemory(c->device, staging, smem, 0));
+    void* p = NULL;
+    VK_CHECK(vkMapMemory(c->device, smem, 0, VK_WHOLE_SIZE, 0, &p));
+    rows_in(p, src, pitch, &t->desc);
+    vkUnmapMemory(c->device, smem);
+
+    VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                   .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    VK_CHECK(vkBeginCommandBuffer(c->cmd, &bi));
+    if (m->alias_ok) {
+        VkBufferCopy region = {.size = bytes};
+        vkCmdCopyBuffer(c->cmd, staging, m->buffer, 1, &region);
+    } else {
+        /* the image path: to GENERAL first (UNDEFINED discards, and we
+         * overwrite the whole image anyway) */
+        VkImageMemoryBarrier ib = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = m->first_write ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = m->image,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
+        };
+        vkCmdPipelineBarrier(c->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, NULL, 0, NULL, 1, &ib);
+        VkBufferImageCopy region = {.bufferRowLength = pitch / 4,
+                                    .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                    .imageExtent = {w, h, 1}};
+        vkCmdCopyBufferToImage(c->cmd, staging, m->image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+    }
+    VK_CHECK(vkEndCommandBuffer(c->cmd));
+    VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &c->cmd};
+    VK_CHECK(vkQueueSubmit(c->queue, 1, &si, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(c->queue));
+    vkDestroyBuffer(c->device, staging, NULL);
+    vkFreeMemory(c->device, smem, NULL);
+    infer_sync_set(&t->ready, -1);
     return 0;
 }
 
@@ -698,7 +820,7 @@ void infer_vk_release(struct infer_ctx_vk* c, struct infer_tensor* t) {
     struct infer_mem_vk* m = &t->mem.vk;
     if (!m->memory) { return; }
     vkQueueWaitIdle(c->queue);
-    struct vk_tensor_extra* x = t->edge_state;
+    struct vk_tensor_extra* x = t->priv;
     if (x && x->set) { vkFreeDescriptorSets(c->device, c->pool, 1, &x->set); }
     if (m->fence) { vkDestroyFence(c->device, m->fence, NULL); }
     if (m->done) { vkDestroySemaphore(c->device, m->done, NULL); }

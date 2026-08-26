@@ -157,6 +157,8 @@ int infer_ctx_gl_borrow(struct infer_ctx_gl* c, EGLDisplay dpy, EGLContext ctx, 
 
 void infer_ctx_gl_fini(struct infer_ctx_gl* c) {
     if (c->gen_program) { glDeleteProgram(c->gen_program); }
+    if (c->upload_fbo) { glDeleteFramebuffers(1, &c->upload_fbo); }
+    if (c->upload_tex) { glDeleteTextures(1, &c->upload_tex); }
     if (c->owned) {
         eglMakeCurrent(c->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (c->ctx != EGL_NO_CONTEXT) { eglDestroyContext(c->dpy, c->ctx); }
@@ -190,7 +192,7 @@ void infer_ctx_gl_fini(struct infer_ctx_gl* c) {
  * writes into a tiled copy it never flushes to the dma-buf). */
 static void negotiate_modifier(struct infer_ctx_gl* c) {
     c->bo_negotiated = 1;
-    c->bo_explicit = 0;
+    c->bo_modifier_count = 0;
 
     EGLuint64KHR egl_mods[64];
     EGLBoolean external[64];
@@ -199,13 +201,13 @@ static void negotiate_modifier(struct infer_ctx_gl* c) {
         (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
     if (!c->has_modifiers || !query ||
         !query(c->dpy, DRM_FORMAT_ABGR8888, 64, egl_mods, external, &egl_n) || egl_n <= 0) {
-        fprintf(stderr, "gl: no modifier query; letting the driver choose the layout\n");
+        if (infer_verbose) { fprintf(stderr, "gl: no modifier query; letting the driver choose the layout\n"); }
         return;
     }
     uint64_t vk_mods[64];
     int vk_n = infer_vk_importable_modifiers(vk_mods, 64);
     if (vk_n <= 0) {
-        fprintf(stderr, "gl: no importer modifier list; letting the driver choose the layout\n");
+        if (infer_verbose) { fprintf(stderr, "gl: no importer modifier list; letting the driver choose the layout\n"); }
         return;
     }
 
@@ -221,11 +223,13 @@ static void negotiate_modifier(struct infer_ctx_gl* c) {
         }
     }
     if (!shared_n) {
-        fprintf(stderr,
-                "gl: no layout is both renderable and importable (%d renderable, %d importable);"
-                " letting the driver choose\n",
-                (int)egl_n,
-                vk_n);
+        if (infer_verbose) {
+            fprintf(stderr,
+                    "gl: no layout is both renderable and importable (%d renderable, %d importable);"
+                    " letting the driver choose\n",
+                    (int)egl_n,
+                    vk_n);
+        }
         return;
     }
 
@@ -250,21 +254,31 @@ static void negotiate_modifier(struct infer_ctx_gl* c) {
         }
         shared[j] = m;
     }
-    for (int i = 0; i < shared_n; i++) {
-        struct gbm_bo* bo = gbm_bo_create_with_modifiers(c->gbm, 64, 64, GBM_FORMAT_ABGR8888, &shared[i], 1);
-        if (!bo) { continue; }
-        c->bo_modifier = gbm_bo_get_modifier(bo);
-        c->bo_explicit = 1;
-        gbm_bo_destroy(bo);
+    memcpy(c->bo_modifiers, shared, (size_t)shared_n * sizeof shared[0]);
+    c->bo_modifier_count = shared_n;
+    if (infer_verbose) {
         fprintf(stderr,
-                "gl: layout 0x%llx (%d renderable, %d importable, %d shared; finest block first)\n",
-                (unsigned long long)c->bo_modifier,
+                "gl: layouts: %d renderable, %d importable, %d shared; preferring 0x%llx\n",
                 (int)egl_n,
                 vk_n,
-                shared_n);
-        return;
+                shared_n,
+                (unsigned long long)shared[0]);
     }
-    fprintf(stderr, "gl: none of the shared layouts can be allocated; letting the driver choose\n");
+}
+
+/* A layout that allocates at one size can be refused at another --
+ * Apple's compressed twiddled layout (0xc00000000000002) takes a 96x32
+ * image and refuses 1024x4 -- so the shared layouts are tried per
+ * allocation, preferred first. The driver's own choice comes last: it
+ * renders, but whether anyone can import it is luck (NVIDIA: no), and
+ * the modifier that travels with the fd says which one it was. */
+static struct gbm_bo* create_bo(struct infer_ctx_gl* c, uint32_t w, uint32_t h) {
+    for (int i = 0; i < c->bo_modifier_count; i++) {
+        struct gbm_bo* bo =
+            gbm_bo_create_with_modifiers(c->gbm, w, h, GBM_FORMAT_ABGR8888, &c->bo_modifiers[i], 1);
+        if (bo) { return bo; }
+    }
+    return gbm_bo_create(c->gbm, w, h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING);
 }
 
 static int alloc_tensor(struct infer_ctx_gl* c, const struct infer_desc* d, struct infer_tensor* t) {
@@ -278,11 +292,7 @@ static int alloc_tensor(struct infer_ctx_gl* c, const struct infer_desc* d, stru
     /* the layout every consumer can live with; see negotiate_modifier.
      * The modifier travels with the fd, so importers see the real layout. */
     if (!c->bo_negotiated) { negotiate_modifier(c); }
-    t->mem.gl.bo =
-        c->bo_explicit
-            ? gbm_bo_create_with_modifiers(c->gbm, d->img_w, d->img_h, GBM_FORMAT_ABGR8888,
-                                           &c->bo_modifier, 1)
-            : gbm_bo_create(c->gbm, d->img_w, d->img_h, GBM_FORMAT_ABGR8888, GBM_BO_USE_RENDERING);
+    t->mem.gl.bo = create_bo(c, d->img_w, d->img_h);
     INFER_CHECK(t->mem.gl.bo, "gl: gbm_bo_create failed");
     uint64_t mod = gbm_bo_get_modifier(t->mem.gl.bo);
     if (mod == DRM_FORMAT_MOD_INVALID) { mod = DRM_FORMAT_MOD_LINEAR; }
@@ -296,13 +306,15 @@ static int alloc_tensor(struct infer_ctx_gl* c, const struct infer_desc* d, stru
     t->desc.row_pitch_bytes = t->desc.plane_pitch[0];
     t->mem.gl.dmabuf_fd = gbm_bo_get_fd(t->mem.gl.bo);
     INFER_CHECK(t->mem.gl.dmabuf_fd >= 0, "gl: gbm_bo_get_fd failed");
-    fprintf(stderr,
+    if (infer_verbose) {
+        fprintf(stderr,
             "gl: tensor %ux%u, modifier 0x%llx, %u plane(s), pitch %u\n",
             d->img_w,
             d->img_h,
             (unsigned long long)mod,
             t->desc.planes,
             t->desc.row_pitch_bytes);
+    }
 
     static const EGLint plane_fd[4] = {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE1_FD_EXT,
                                        EGL_DMA_BUF_PLANE2_FD_EXT, EGL_DMA_BUF_PLANE3_FD_EXT};
@@ -354,6 +366,10 @@ static int alloc_tensor(struct infer_ctx_gl* c, const struct infer_desc* d, stru
     return 0;
 }
 
+int infer_gl_alloc(struct infer_ctx_gl* c, const struct infer_desc* d, struct infer_tensor* t) {
+    return t->mem.gl.bo ? 0 : alloc_tensor(c, d, t);
+}
+
 /* the consumer's "done reading" fence, honoured on the GPU timeline */
 static void wait_released(struct infer_ctx_gl* c, struct infer_tensor* t) {
     int fd = t->released.sync_fd;
@@ -372,24 +388,9 @@ static void wait_released(struct infer_ctx_gl* c, struct infer_tensor* t) {
     infer_sync_reset(&t->released);
 }
 
-int infer_gl_gen(struct infer_ctx_gl* c,
-                 const struct infer_desc* d,
-                 uint32_t seed,
-                 struct infer_tensor* t) {
-    if (!t->mem.gl.bo && alloc_tensor(c, d, t) < 0) { return -1; }
-    wait_released(c, t);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, t->mem.gl.fbo);
-    glViewport(0, 0, (GLsizei)t->desc.img_w, (GLsizei)t->desc.img_h);
-    glDisable(GL_BLEND);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_SCISSOR_TEST);
-    glUseProgram(c->gen_program);
-    glUniform4ui(glGetUniformLocation(c->gen_program, "p"), t->desc.img_w, t->desc.img_h, 0, seed);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    GLenum err = glGetError();
-    INFER_CHECK(err == GL_NO_ERROR, "gl: draw failed (0x%x)", err);
-
+/* our write's completion as the tensor's ready token: a native fence
+ * fd where the driver has them, glFinish where it does not */
+static int signal_ready(struct infer_ctx_gl* c, struct infer_tensor* t) {
     if (c->has_native_fence) {
         EGLSyncKHR s = c->create_sync(c->dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, NULL);
         glFlush(); /* the fence fd exists once the commands are submitted */
@@ -403,6 +404,62 @@ int infer_gl_gen(struct infer_ctx_gl* c,
     return 0;
 }
 
+int infer_gl_gen(struct infer_ctx_gl* c,
+                 const struct infer_desc* d,
+                 uint32_t seed,
+                 struct infer_tensor* t) {
+    if (infer_gl_alloc(c, d, t) < 0) { return -1; }
+    wait_released(c, t);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, t->mem.gl.fbo);
+    glViewport(0, 0, (GLsizei)t->desc.img_w, (GLsizei)t->desc.img_h);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glUseProgram(c->gen_program);
+    glUniform4ui(glGetUniformLocation(c->gen_program, "p"), t->desc.img_w, t->desc.img_h, 0, seed);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    GLenum err = glGetError();
+    INFER_CHECK(err == GL_NO_ERROR, "gl: draw failed (0x%x)", err);
+    return signal_ready(c, t);
+}
+
+/* Host floats into the bo (an output a GL consumer owns, produced by
+ * the CPU engine). Not through gbm_bo_map: no driver maps every layout
+ * it renders into (NVIDIA maps only linear). A texture upload and a
+ * blit into the tensor's FBO go through the driver's own tiling path,
+ * and RGBA8 -> RGBA8 with NEAREST is a byte copy. */
+int infer_gl_upload(struct infer_ctx_gl* c, const float* src, struct infer_tensor* t) {
+    INFER_CHECK(t->mem.gl.fbo, "gl: tensor has no framebuffer to write");
+    wait_released(c, t);
+    GLsizei w = (GLsizei)t->desc.img_w, h = (GLsizei)t->desc.img_h;
+    if (!c->upload_tex) {
+        glGenTextures(1, &c->upload_tex);
+        glGenFramebuffers(1, &c->upload_fbo);
+    }
+    /* the image may hold more texels than the tensor has elements */
+    size_t n = infer_desc_elements(&t->desc), texels = (size_t)w * h;
+    float* padded = NULL;
+    if (texels != n) {
+        padded = calloc(texels, sizeof(float));
+        memcpy(padded, src, n * sizeof(float));
+    }
+    glBindTexture(GL_TEXTURE_2D, c->upload_tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4); /* rows are img_w * 4 bytes */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, padded ? padded : src);
+    free(padded);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, c->upload_fbo);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c->upload_tex, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, t->mem.gl.fbo);
+    glDisable(GL_SCISSOR_TEST);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    GLenum err = glGetError();
+    INFER_CHECK(err == GL_NO_ERROR, "gl: upload blit failed (0x%x)", err);
+    return signal_ready(c, t);
+}
+
 /* Read the tensor back through GL rather than by mapping the bo. No
  * layout is both renderable and CPU-mappable on every driver -- NVIDIA
  * renders only into block-linear and maps only linear, so gbm_bo_map
@@ -413,6 +470,34 @@ int infer_gl_gen(struct infer_ctx_gl* c,
 int infer_gl_readback(struct infer_ctx_gl* c, const struct infer_tensor* t, float* dst) {
     (void)c;
     INFER_CHECK(t->mem.gl.fbo, "gl: tensor has no framebuffer to read");
+    /* A foreign writer's (Dawn's) completion is the sync file on `ready`;
+     * our own draws are ordered by the context. Waiting on the host is
+     * not enough: GL has no idea the bo's bytes changed and serves a
+     * cached view of the renderbuffer -- measured as stale readbacks
+     * whenever the same FBO is read twice with no GL work in between
+     * (one output, one slot, a non-GL producer); switching FBOs between
+     * reads happened to invalidate it, which is why two slots or two
+     * outputs passed. So: the fence as an EGLSync the GPU waits on, and
+     * the renderbuffer re-targeted from the EGLImage, which makes the
+     * driver re-acquire the external memory. */
+    if (t->ready.sync_fd >= 0) {
+        INFER_CHECK(infer_wait_sync_fd(t->ready.sync_fd, 2000) == 0, "gl: ready fence timed out");
+        if (c->has_native_fence) {
+            EGLint attrs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, dup(t->ready.sync_fd), EGL_NONE};
+            EGLSyncKHR s = c->create_sync(c->dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, attrs);
+            if (s != EGL_NO_SYNC_KHR) {
+                c->wait_sync(c->dpy, s, 0); /* EGL owns the dup */
+                c->destroy_sync(c->dpy, s);
+            } else {
+                close(attrs[1]);
+            }
+        }
+        glBindRenderbuffer(GL_RENDERBUFFER, t->mem.gl.rbo);
+        c->image_target_rbo(GL_RENDERBUFFER, t->mem.gl.image);
+    }
+    /* the image may hold more texels than the tensor has elements */
+    size_t n = infer_desc_elements(&t->desc), texels = (size_t)t->desc.img_w * t->desc.img_h;
+    float* padded = texels != n ? malloc(texels * sizeof(float)) : NULL;
     glBindFramebuffer(GL_FRAMEBUFFER, t->mem.gl.fbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 4); /* rows are img_w * 4 bytes */
     glReadPixels(0,
@@ -421,8 +506,12 @@ int infer_gl_readback(struct infer_ctx_gl* c, const struct infer_tensor* t, floa
                  (GLsizei)t->desc.img_h,
                  GL_RGBA,
                  GL_UNSIGNED_BYTE,
-                 dst);
+                 padded ? padded : dst);
     GLenum err = glGetError();
+    if (padded) {
+        memcpy(dst, padded, n * sizeof(float));
+        free(padded);
+    }
     INFER_CHECK(err == GL_NO_ERROR, "gl: glReadPixels failed (0x%x)", err);
     return 0;
 }

@@ -291,6 +291,8 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_gen.wgsl infer_gen_wgsl)
     embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_relayout_wgsl.h
                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_relayout.wgsl infer_relayout_wgsl)
+    embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_relayout_rev_wgsl.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_relayout_rev.wgsl infer_relayout_rev_wgsl)
 
     add_library(infer STATIC infer/infer.h infer/infer_util.h infer/infer_tensor.c
                              infer/infer_ctx_gl.c infer/infer_ctx_vk.c infer/infer_ctx_wgpu.c
@@ -308,12 +310,17 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
 
     enable_testing()
     add_test(NAME infer_cpu_cpu
-             COMMAND hello_inference --src cpu --ep cpu --iters 3 --strict
+             COMMAND hello_inference --src cpu --ep cpu --dst cpu --iters 3 --strict
+                     --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
+    # the raw path: input handed over, run, outputs handed over, no host
+    # memory in the loop -- the cell the whole stage exists to measure
+    add_test(NAME infer_zero_copy
+             COMMAND hello_inference --src wgpu --ep webgpu --dst wgpu --iters 5 --strict
                      --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
     add_test(NAME infer_all_synthetic
              COMMAND hello_inference --all --iters 5 --strict
                      --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
-    set_tests_properties(infer_all_synthetic PROPERTIES LABELS gpu)
+    set_tests_properties(infer_zero_copy infer_all_synthetic PROPERTIES LABELS gpu)
 else()
     message(WARNING "onnxruntime with WebGPU not found under ORT_ROOT=${ORT_ROOT} "
                     "(or no GLSL compiler): skipping infer / hello_inference")
