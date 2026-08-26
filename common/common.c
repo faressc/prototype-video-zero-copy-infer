@@ -121,6 +121,13 @@ static void on_keyboard_key(void* data,
         case XKB_KEY_E: a->effect = 0; break; /* all off */
         case XKB_KEY_c:
         case XKB_KEY_C: a->mode = !a->mode; break;
+        /* stage five: P switches execution provider, H hides the overlay.
+         * A counter rather than a flag for P, so a scene with more than
+         * two providers could cycle them. */
+        case XKB_KEY_p:
+        case XKB_KEY_P: a->infer_ep++; break;
+        case XKB_KEY_h:
+        case XKB_KEY_H: a->overlay = !a->overlay; break;
         default:
             if (sym >= XKB_KEY_1 && sym <= XKB_KEY_9) {
                 int n = (int)(sym - XKB_KEY_1);
@@ -540,6 +547,7 @@ int app_init(struct app* a,
     a->running = 1;
     a->speed = 1.0;
     a->zoom = 1.0;
+    a->overlay = 1; /* H hides it; a hand overlay nobody asked to see is the point */
     a->aux_fd = -1;
     a->pending_w = APP_DEFAULT_WIDTH;
     a->pending_h = APP_DEFAULT_HEIGHT;

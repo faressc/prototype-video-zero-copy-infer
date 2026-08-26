@@ -112,6 +112,18 @@ static int create(struct infer_engine_ort* e, struct infer_ctx* c, const char* m
     ORT_CHECK(e, api->CreateSessionOptions(&e->so));
     ORT_CHECK(e, api->SetSessionGraphOptimizationLevel(e->so, ORT_ENABLE_ALL));
     ORT_CHECK(e, api->SetSessionLogSeverityLevel(e->so, getenv("INFER_ORT_VERBOSE") ? 0 : 2));
+    /* Two sessions in one process (stage five runs a detector and a
+     * landmark model) do NOT overlap in time, and still halve each
+     * other's speed with the default settings: ORT's intra-op pool
+     * spin-waits after its work is done, so the idle session's threads
+     * burn the cores the busy one wants. Measured on the palm detector:
+     * 11.8 ms alone, 23.4 ms with an idle landmark session beside it,
+     * back to ~12 ms with spinning off. One session sees no difference,
+     * which is why stage four never noticed.
+     * INFER_ORT_SPIN=1 restores the default for comparison. */
+    if (!getenv("INFER_ORT_SPIN")) {
+        ORT_CHECK(e, api->AddSessionConfigEntry(e->so, "session.intra_op.allow_spinning", "0"));
+    }
 
     if (e->ep == INFER_EP_WEBGPU) {
         INFER_CHECK(c->have & INFER_WANT_WGPU, "WebGPU EP needs the WebGPU context");

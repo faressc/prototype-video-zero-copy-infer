@@ -10,6 +10,13 @@ never depends on a Python toolchain.
 | `palm_detection_lite.onnx`, `palm_detection_full.onnx` | `input_1` `[1,192,192,3]` | `Identity` `[1,2016,18]` (anchor regressors), `Identity_1` `[1,2016,1]` (scores) | MediaPipe `palm_detection_{lite,full}.tflite` via `convert.sh` (tf2onnx, opset 17) |
 | `hand_landmark_lite.onnx`, `hand_landmark_full.onnx` | `input_1` `[1,224,224,3]` | `Identity` `[1,63]` (21 landmarks × xyz, pixels), `Identity_1` `[1,1]` (hand presence), `Identity_2` `[1,1]` (handedness), `Identity_3` `[1,63]` (world landmarks) | same |
 
+The `hand_*` binaries and `hello_hand` default to the **`_full`** pair —
+the weights MediaPipe's own web demo runs (`modelComplexity: 1` in the
+JS solution; the Tasks `hand_landmarker.task` bundles the full landmark
+model too). `--lite` selects the cheaper pair; the ctest entries pin it
+explicitly so the committed golden values do not move. The lite landmark
+model is visibly noisier around the 0.5 presence gate.
+
 Regenerate with `./models/convert.sh` (needs `uv`; makes a throwaway
 Python 3.12 venv in `models/.venv` because TensorFlow ships no wheels
 for newer interpreters, downloads the `.tflite` files from

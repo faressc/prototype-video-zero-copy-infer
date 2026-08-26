@@ -193,9 +193,12 @@ struct infer_tensor {
     void (*priv_free)(void* p);
 };
 
-/* A camera/decoder frame -- image data with a pixel format. Stage five
- * turns it into a tensor through a FrameToTensor pass; declared here
- * so the vocabulary is complete. */
+/* A camera/decoder frame -- image data with a pixel format. NOT a
+ * tensor and never convertible into one by an edge: an edge preserves
+ * what the bytes MEAN and changes where they live, while frame -> tensor
+ * changes the meaning (pixels in a colour space become normalised NHWC
+ * floats). That is a PASS, and it is stage five's business
+ * (hand/hand_frame_*.c). */
 struct infer_frame {
     int dmabuf_fd[4];
     uint32_t offset[4], pitch[4];
@@ -203,6 +206,15 @@ struct infer_frame {
     uint32_t drm_format; /* fourcc */
     uint32_t width, height;
     uint8_t planes;
+    /* Which YUV->RGB matrix and which quantisation range these bytes
+     * were captured with. A property of the FRAME, not of whoever
+     * consumes it -- otherwise every consumer re-derives it from the
+     * driver and they drift. */
+    uint8_t bt709, full_range;
+    /* A CPU mapping when the owner has one (V4L2 MMAP buffers do, via
+     * camera_map()); NULL for a device-only frame. The CPU FrameToTensor
+     * reads this, the WebGPU one imports dmabuf_fd instead. */
+    void* map;
     struct infer_sync ready;
 };
 
@@ -427,6 +439,74 @@ int infer_wgpu_import_access(struct infer_ctx_wgpu* c,
                              WGPUBuffer buf,
                              int* release_fd /* out: Dawn's fence for the other side */);
 void infer_wgpu_import_destroy(void* im);
+
+/* ------------------------------------------------------------------ */
+/* stage five: a camera frame imported for sampling, and a polled     */
+/* readback                                                           */
+/* ------------------------------------------------------------------ */
+
+/* A dma-buf holding PIXELS (not a byte image) imported into the Dawn
+ * device to be READ by a compute pass. Two differences from
+ * infer_wgpu_import above, both forced by what a camera frame is:
+ *
+ *   - the format is the frame's fourcc, so NV12 arrives as a biplanar
+ *     texture and the caller samples per-plane views, rather than
+ *     ABGR8888 with the relayout pipelines bolted on;
+ *   - begin and end are SEPARATE calls, because stage five records TWO
+ *     passes over one frame in a single access bracket (the detector's
+ *     letterbox and the landmark stage's rotated crop).
+ *
+ * Returns NULL when the driver will not let a compute shader read the
+ * frame -- the caller's fallback is then the host path (convert on the
+ * CPU and wgpuQueueWriteBuffer, which is the registry's cpu -> wgpu row).
+ * There is deliberately no device-side fallback: Dawn refuses
+ * CopyTextureToTexture on a multiplanar texture outright
+ * (CommandEncoder.cpp, "Copying between a multiplanar texture and
+ * another texture is currently not allowed"), so the only other device
+ * route would be CopyTextureToBuffer per plane aspect plus a second
+ * shader that samples buffers instead of textures -- untestable on a
+ * driver that grants the views, and an untested rung is worse than a
+ * host path that every CPU-EP run exercises.
+ *
+ * The import is the expensive part; cache one per camera buffer and keep
+ * it for the camera's lifetime. */
+struct infer_wgpu_frame_import;
+struct infer_wgpu_frame_import* infer_wgpu_frame_import_create(struct infer_ctx_wgpu* c,
+                                                               const struct infer_frame* f);
+/* plane 0 = luma (r8unorm), plane 1 = chroma (rg8unorm, half size). The
+ * views are valid between begin and end. */
+WGPUTextureView infer_wgpu_frame_plane(const struct infer_wgpu_frame_import* im, int plane);
+/* BeginAccess, gated by acquire_fd (-1 = nothing to wait for). For the
+ * COPY path this also records the plane copies, so the views the caller
+ * samples are ready when its own pass runs. */
+int infer_wgpu_frame_begin(struct infer_ctx_wgpu* c,
+                           struct infer_wgpu_frame_import* im,
+                           int acquire_fd);
+/* EndAccess. *release_fd is Dawn's "done reading this frame" fence as a
+ * sync file -- what the frame's owner (V4L2, through cam_stream) must
+ * see signal before it may hand the buffer back to the device. */
+int infer_wgpu_frame_end(struct infer_ctx_wgpu* c,
+                         struct infer_wgpu_frame_import* im,
+                         int* release_fd);
+void infer_wgpu_frame_import_destroy(void* im);
+
+/* A readback that is POLLED instead of waited on: infer_wgpu_readback
+ * blocks in wgpuInstanceWaitAny(UINT64_MAX), which a render loop cannot
+ * do. submit() copies into a MapRead staging buffer and starts the map;
+ * poll() returns 1 and fills dst once the map completed, 0 while it is
+ * still in flight, -1 on error. One buffer is in flight at a time: a
+ * MapRead buffer cannot be re-mapped while mapped, and nothing may be
+ * copied into it while mapped, so submit() refuses until poll() drained
+ * the previous one. This is the consumer's ready token, polled. */
+struct infer_wgpu_readback;
+struct infer_wgpu_readback* infer_wgpu_readback_create(struct infer_ctx_wgpu* c, size_t bytes);
+int infer_wgpu_readback_submit(struct infer_ctx_wgpu* c,
+                               struct infer_wgpu_readback* rb,
+                               WGPUBuffer src,
+                               size_t bytes);
+int infer_wgpu_readback_poll(struct infer_ctx_wgpu* c, struct infer_wgpu_readback* rb, float* dst);
+int infer_wgpu_readback_inflight(const struct infer_wgpu_readback* rb);
+void infer_wgpu_readback_destroy(struct infer_wgpu_readback* rb);
 
 /* ------------------------------------------------------------------ */
 /* the edge registry                                                  */

@@ -26,11 +26,24 @@
 #include "raster.h"
 #include "shm_present.h"
 
+/* Stage five (README §21), compiled in for hand_shm only: cam_shm stays
+ * exactly what stage three made it. */
+#if SCENE_HAND
+#include "hand_overlay_cpu.h"
+#include "scene_hand.h"
+#endif
+
 struct cam_scene {
     struct cam_stream stream;
     uint32_t cw, ch;      /* camera size */
     uint32_t* rgb;        /* converted camera frame: the "texture" */
     uint32_t* scratch[2]; /* the chain ping-pongs between these */
+#if SCENE_HAND
+    struct hand_scene hand;
+    uint32_t* overlaid; /* the chain's output with the skeleton drawn on */
+    int argc;
+    char** argv;
+#endif
 };
 
 /* ------------------------------------------------------------------ */
@@ -38,9 +51,27 @@ struct cam_scene {
 /* ------------------------------------------------------------------ */
 
 static int cpu_fence_done(void* fence, void* user) {
+#if SCENE_HAND
+    /* Stage five adds an ASYNCHRONOUS second reader of the same buffer:
+     * the tracker's worker thread, which reads the ISP's pages directly
+     * rather than the converted copy. So "free" is no longer trivially
+     * true here, and cam_stream needs a fence to ask about -- it skips
+     * done() entirely for a NULL one.
+     *
+     * The fence is opaque to cam_stream, so the buffer INDEX travels
+     * inside the pointer (index + 1, so that 0 stays "no fence"). Not a
+     * cast for its own sake: there is no object to point at, and the
+     * alternative is a per-buffer array of sentinels that exists only to
+     * be pointed at. */
+    struct cam_scene* s = user;
+    const int index = (int)(uintptr_t)fence - 1;
+    return !hand_scene_holds(&s->hand, index);
+#else
+    /* the CPU IS the reader: a buffer is free the moment draw() returns */
     (void)fence;
     (void)user;
     return 1;
+#endif
 }
 
 static const struct cam_fence_ops cpu_fence_ops = {.done = cpu_fence_done, .destroy = NULL};
@@ -220,7 +251,10 @@ static void on_cam_fd(struct app* a) {
 
 static void cam_init(struct shm_presenter* p, void* user) {
     struct cam_scene* s = user;
-    if (cam_stream_open(&s->stream, &cpu_fence_ops, NULL) < 0) { exit(1); }
+    /* the scene as the fence callback's user: stage three's CPU fence
+     * needed nothing and passed NULL, but stage five's has to ask the
+     * tracker whether it is still reading the buffer */
+    if (cam_stream_open(&s->stream, &cpu_fence_ops, s) < 0) { exit(1); }
     const uint32_t pf = s->stream.cam.format.pixelformat;
     if (pf != V4L2_PIX_FMT_NV12 && pf != V4L2_PIX_FMT_YUYV) {
         fprintf(stderr, "cam_shm: only NV12 and YUYV are implemented on the CPU path\n");
@@ -236,6 +270,12 @@ static void cam_init(struct shm_presenter* p, void* user) {
     p->app.aux_fd = cam_stream_fd(&s->stream);
     p->app.on_aux_fd = on_cam_fd;
     p->app.effect_count = FX_COUNT;
+#if SCENE_HAND
+    if (hand_scene_init(&s->hand, &s->stream, s->argc, s->argv) < 0) { exit(2); }
+    /* the chain's output is const to the letterbox/cube step, so the
+     * overlay goes onto a copy rather than into the effect scratch */
+    s->overlaid = malloc(n * sizeof(uint32_t));
+#endif
 }
 
 static void cam_draw(struct shm_presenter* p, const struct shm_target* t, void* user) {
@@ -255,7 +295,13 @@ static void cam_draw(struct shm_presenter* p, const struct shm_target* t, void* 
     const uint8_t* base = camera_map(&s->stream.cam, (uint32_t)latest);
     if (!base) { return; }
     camera_frame_to_xrgb(&s->stream.cam, base, s->rgb);
+#if SCENE_HAND
+    /* the index in the pointer: see cpu_fence_done. The converted copy is
+     * done with, but the tracker may still be in the original. */
+    cam_stream_rendered(&s->stream, latest, (void*)(uintptr_t)(latest + 1));
+#else
     cam_stream_rendered(&s->stream, latest, NULL); /* CPU: done reading already */
+#endif
 
     /* the chain: each pass reads the previous stage, writes the other
      * scratch. `img` ends up pointing at the final stage. */
@@ -268,6 +314,29 @@ static void cam_draw(struct shm_presenter* p, const struct shm_target* t, void* 
         effect_pass(passes[i], img, dst, (int)s->cw, (int)s->ch);
         img = dst;
     }
+
+#if SCENE_HAND
+    hand_scene_update(&s->hand, &p->app, &s->stream, latest);
+    if (p->app.mode && s->hand.vert_count > 0) {
+        /* Cube mode: the skeleton goes onto the image at CAMERA
+         * resolution and the cube's texture lookup carries it onto the
+         * rotating face -- the same trick the GPU scenes use, and for the
+         * same reason: no landmark has to be projected through the MVP. */
+        const size_t n = (size_t)s->cw * (size_t)s->ch;
+        memcpy(s->overlaid, img, n * sizeof(uint32_t));
+        hand_overlay_cpu_draw(s->overlaid,
+                              (int)s->cw,
+                              (int)s->ch,
+                              (int)s->cw,
+                              s->hand.verts,
+                              s->hand.vert_count,
+                              (float)s->cw,
+                              (float)s->ch,
+                              0.0f,
+                              0.0f);
+        img = s->overlaid;
+    }
+#endif
 
     if (p->app.mode) { /* C: the chain's output on the cube */
         draw_cube(s, &p->app, t, img);
@@ -285,11 +354,31 @@ static void cam_draw(struct shm_presenter* p, const struct shm_target* t, void* 
         const uint32_t* src = img + (size_t)((float)y / sc) * (size_t)s->cw;
         for (int x = 0; x < dw; x++) { row[x] = src[(size_t)((float)x / sc)]; }
     }
+
+#if SCENE_HAND
+    /* Fullscreen mode: straight onto the window, over the letterboxed
+     * image, in the same rectangle the image went into. Pixel space, so
+     * there is no vertical convention to get wrong. */
+    hand_overlay_cpu_draw(t->pixels,
+                          t->width,
+                          t->height,
+                          t->stride_px,
+                          s->hand.verts,
+                          s->hand.vert_count,
+                          (float)dw,
+                          (float)dh,
+                          (float)x0,
+                          (float)y0);
+#endif
 }
 
 static void cam_fini(struct shm_presenter* p, void* user) {
     (void)p;
     struct cam_scene* s = user;
+#if SCENE_HAND
+    hand_scene_fini(&s->hand); /* before the camera: the worker may hold a buffer */
+    free(s->overlaid);
+#endif
     cam_stream_close(&s->stream);
     free(s->rgb);
     free(s->scratch[0]);
@@ -303,15 +392,28 @@ static const struct shm_scene cam_scene = {
     .fini = cam_fini,
 };
 
-int main(void) {
+int main(int argc, char** argv) {
     struct cam_scene s = {0};
     struct shm_presenter p;
+#if SCENE_HAND
+    s.argc = argc;
+    s.argv = argv;
+#else
+    (void)argc;
+    (void)argv;
+#endif
     if (shm_present_init(&p,
                          SHM_PRESENT_DEPTH,
                          &cam_scene,
                          &s,
+#if SCENE_HAND
+                         "hand tracking (shm, CPU)",
+                         "hello-wayland-hand-shm"
+#else
                          "camera (shm, CPU)",
-                         "hello-wayland-cam-shm") < 0) {
+                         "hello-wayland-cam-shm"
+#endif
+                         ) < 0) {
         return 1;
     }
     shm_present_run(&p);

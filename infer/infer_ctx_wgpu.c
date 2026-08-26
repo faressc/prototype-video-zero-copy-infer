@@ -559,3 +559,328 @@ void infer_wgpu_import_destroy(void* p) {
     if (im->mem) { wgpuSharedTextureMemoryRelease(im->mem); }
     free(im);
 }
+
+/* ------------------------------------------------------------------ */
+/* stage five: a camera frame imported for sampling                   */
+/* ------------------------------------------------------------------ */
+
+/* A camera's NV12 dma-buf imports as a biplanar texture. The measured
+ * usage on this driver is CopySrc | TextureBinding only --
+ * DawnMultiPlanarFormats is present, MultiPlanarFormatExtendedUsages is
+ * not -- and the question that mattered was whether that is enough to
+ * create per-plane SAMPLED views. Measured 2026-08-26 on Honeykrisp
+ * (Mesa 26.1.7, M1): it is. `hello_hand --probe` reports it, because it
+ * is a driver fact and the next driver may say otherwise.
+ *
+ * There is no device-side fallback, and that is a finding rather than an
+ * omission. The obvious one -- copy the plane aspects into textures Dawn
+ * owns -- is refused outright: CommandEncoder.cpp's
+ * APICopyTextureToTexture has a blanket "Copying between a multiplanar
+ * texture and another texture is currently not allowed" on either side
+ * of the copy. CopyTextureToBuffer carries no such rule, so a driver
+ * that refused the views could still be served by copying each plane
+ * into a buffer and sampling buffers instead of textures -- at the cost
+ * of a second shader that no driver here can exercise. An untested rung
+ * is worse than the host path (convert on the CPU, wgpuQueueWriteBuffer:
+ * the registry's cpu -> wgpu row), which every CPU-EP run exercises, so
+ * this returns NULL and lets the caller take that. */
+struct infer_wgpu_frame_import {
+    struct infer_ctx_wgpu* c;
+    WGPUSharedTextureMemory mem;
+    WGPUTexture tex;          /* the imported frame */
+    WGPUTextureView plane[2]; /* what the caller's pass samples */
+    int layout;               /* VkImageLayout the image is in when we next acquire it */
+    uint32_t w, h;
+    int planes;
+    int in_access;
+};
+
+/* The per-plane format of a biplanar frame; single-plane frames are
+ * sampled through the format they were imported with. */
+static WGPUTextureFormat plane_format(int plane) {
+    return plane == 0 ? WGPUTextureFormat_R8Unorm : WGPUTextureFormat_RG8Unorm;
+}
+
+static int make_plane_views(struct infer_wgpu_frame_import* im, WGPUTextureFormat tex_format) {
+    int errors0 = im->c->errors;
+    for (int p = 0; p < im->planes; p++) {
+        WGPUTextureViewDescriptor vd = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        vd.dimension = WGPUTextureViewDimension_2D;
+        vd.mipLevelCount = 1;
+        vd.arrayLayerCount = 1;
+        if (im->planes > 1) {
+            /* a plane of a multiplanar texture: the aspect selects it and
+             * the view's format is the PLANE's, not the texture's */
+            vd.aspect = p == 0 ? WGPUTextureAspect_Plane0Only : WGPUTextureAspect_Plane1Only;
+            vd.format = plane_format(p);
+        } else {
+            vd.aspect = WGPUTextureAspect_All;
+            vd.format = tex_format;
+        }
+        im->plane[p] = wgpuTextureCreateView(im->tex, &vd);
+        if (!im->plane[p] || im->c->errors != errors0) { return -1; }
+    }
+    return 0;
+}
+
+struct infer_wgpu_frame_import* infer_wgpu_frame_import_create(struct infer_ctx_wgpu* c,
+                                                               const struct infer_frame* f) {
+    if (!c->has_dmabuf) {
+        fprintf(stderr, "wgpu: SharedTextureMemoryDmaBuf unavailable\n");
+        return NULL;
+    }
+    int errors0 = c->errors;
+    struct infer_wgpu_frame_import* im = calloc(1, sizeof *im);
+    im->c = c;
+    im->w = f->width;
+    im->h = f->height;
+    im->planes = f->planes < 1 ? 1 : f->planes > 2 ? 2 : f->planes;
+    /* the frame's producer (the ISP, through V4L2) never told Vulkan
+     * about a layout: whatever Dawn finds, it must treat as undefined
+     * the first time and as what it left behind after that */
+    im->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    WGPUSharedTextureMemoryDmaBufPlane planes[4];
+    for (int p = 0; p < im->planes; p++) {
+        planes[p] =
+            (WGPUSharedTextureMemoryDmaBufPlane){f->dmabuf_fd[0], f->offset[p], f->pitch[p]};
+    }
+    WGPUSharedTextureMemoryDmaBufDescriptor dma = WGPU_SHARED_TEXTURE_MEMORY_DMA_BUF_DESCRIPTOR_INIT;
+    dma.size = (WGPUExtent3D){f->width, f->height, 1};
+    dma.drmFormat = f->drm_format;
+    dma.drmModifier = f->drm_modifier;
+    dma.planeCount = (size_t)im->planes;
+    dma.planes = planes;
+    WGPUSharedTextureMemoryDescriptor sd = WGPU_SHARED_TEXTURE_MEMORY_DESCRIPTOR_INIT;
+    sd.nextInChain = &dma.chain;
+    sd.label = SV("infer camera frame");
+    im->mem = wgpuDeviceImportSharedTextureMemory(c->device, &sd);
+    WGPUSharedTextureMemoryProperties props = WGPU_SHARED_TEXTURE_MEMORY_PROPERTIES_INIT;
+    if (!im->mem || wgpuSharedTextureMemoryGetProperties(im->mem, &props) != WGPUStatus_Success ||
+        c->errors != errors0) {
+        fprintf(stderr, "wgpu: frame dma-buf import failed (fourcc 0x%08x)\n", f->drm_format);
+        infer_wgpu_frame_import_destroy(im);
+        return NULL;
+    }
+    if (!(props.usage & WGPUTextureUsage_CopySrc)) {
+        fprintf(stderr,
+                "wgpu: frame import grants neither reads nor copies (usage 0x%llx)\n",
+                (unsigned long long)props.usage);
+        infer_wgpu_frame_import_destroy(im);
+        return NULL;
+    }
+
+    if (!(props.usage & WGPUTextureUsage_TextureBinding)) {
+        fprintf(stderr,
+                "wgpu: frame import is not readable by a shader (usage 0x%llx); "
+                "the caller must convert on the host\n",
+                (unsigned long long)props.usage);
+        infer_wgpu_frame_import_destroy(im);
+        return NULL;
+    }
+    WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    /* ask for exactly what the import granted, no more: requesting a
+     * usage the memory does not allow is an error */
+    td.usage = props.usage & (WGPUTextureUsage_CopySrc | WGPUTextureUsage_TextureBinding);
+    td.dimension = WGPUTextureDimension_2D;
+    td.size = props.size;
+    td.format = props.format;
+    td.mipLevelCount = 1;
+    td.sampleCount = 1;
+    im->tex = wgpuSharedTextureMemoryCreateTexture(im->mem, &td);
+    if (!im->tex || c->errors != errors0) {
+        fprintf(stderr, "wgpu: frame texture creation failed\n");
+        infer_wgpu_frame_import_destroy(im);
+        return NULL;
+    }
+    if (make_plane_views(im, props.format) < 0) {
+        fprintf(stderr,
+                "wgpu: this driver refuses per-plane views of an imported %s frame; "
+                "the caller must convert on the host\n",
+                im->planes > 1 ? "multiplanar" : "single-plane");
+        infer_wgpu_frame_import_destroy(im);
+        return NULL;
+    }
+    if (infer_verbose) {
+        fprintf(stderr,
+                "wgpu: frame %ux%u fourcc 0x%08x %d plane(s), usage 0x%llx, plane views ok\n",
+                f->width,
+                f->height,
+                f->drm_format,
+                im->planes,
+                (unsigned long long)props.usage);
+    }
+    if (c->errors != errors0) {
+        infer_wgpu_frame_import_destroy(im);
+        return NULL;
+    }
+    return im;
+}
+
+WGPUTextureView infer_wgpu_frame_plane(const struct infer_wgpu_frame_import* im, int plane) {
+    return plane >= 0 && plane < im->planes ? im->plane[plane] : NULL;
+}
+
+int infer_wgpu_frame_begin(struct infer_ctx_wgpu* c,
+                           struct infer_wgpu_frame_import* im,
+                           int acquire_fd) {
+    int errors0 = c->errors;
+    INFER_CHECK(!im->in_access, "wgpu: frame import already in an access bracket");
+
+    WGPUSharedFence fence = NULL;
+    uint64_t one = 1;
+    if (acquire_fd >= 0 && c->has_sync_fd) {
+        WGPUSharedFenceSyncFDDescriptor fdd = WGPU_SHARED_FENCE_SYNC_FD_DESCRIPTOR_INIT;
+        fdd.handle = acquire_fd;
+        WGPUSharedFenceDescriptor fd = WGPU_SHARED_FENCE_DESCRIPTOR_INIT;
+        fd.nextInChain = &fdd.chain;
+        fence = wgpuDeviceImportSharedFence(c->device, &fd);
+    } else if (acquire_fd >= 0) {
+        infer_wait_sync_fd(acquire_fd, 1000); /* no fence import: host wait */
+    }
+    WGPUSharedTextureMemoryVkImageLayoutBeginState bl =
+        WGPU_SHARED_TEXTURE_MEMORY_VK_IMAGE_LAYOUT_BEGIN_STATE_INIT;
+    bl.oldLayout = im->layout;
+    bl.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    WGPUSharedTextureMemoryBeginAccessDescriptor ba =
+        WGPU_SHARED_TEXTURE_MEMORY_BEGIN_ACCESS_DESCRIPTOR_INIT;
+    ba.nextInChain = &bl.chain;
+    ba.initialized = 1; /* the ISP filled it; no lazy clear wanted */
+    ba.concurrentRead = 0;
+    ba.fenceCount = fence ? 1 : 0;
+    ba.fences = &fence;
+    ba.signaledValueCount = fence ? 1 : 0;
+    ba.signaledValues = &one;
+    WGPUStatus bs = wgpuSharedTextureMemoryBeginAccess(im->mem, im->tex, &ba);
+    if (fence) { wgpuSharedFenceRelease(fence); }
+    INFER_CHECK(bs == WGPUStatus_Success, "wgpu: frame BeginAccess failed");
+    im->in_access = 1;
+    return c->errors != errors0 ? -1 : 0;
+}
+
+int infer_wgpu_frame_end(struct infer_ctx_wgpu* c,
+                         struct infer_wgpu_frame_import* im,
+                         int* release_fd) {
+    *release_fd = -1;
+    int errors0 = c->errors;
+    INFER_CHECK(im->in_access, "wgpu: frame import is not in an access bracket");
+    WGPUSharedTextureMemoryVkImageLayoutEndState el =
+        WGPU_SHARED_TEXTURE_MEMORY_VK_IMAGE_LAYOUT_END_STATE_INIT;
+    WGPUSharedTextureMemoryEndAccessState ea = WGPU_SHARED_TEXTURE_MEMORY_END_ACCESS_STATE_INIT;
+    ea.nextInChain = &el.chain;
+    WGPUStatus es = wgpuSharedTextureMemoryEndAccess(im->mem, im->tex, &ea);
+    if (es == WGPUStatus_Success && ea.fenceCount > 0) { *release_fd = export_fence_fd(ea.fences[0]); }
+    wgpuSharedTextureMemoryEndAccessStateFreeMembers(ea);
+    im->in_access = 0;
+    INFER_CHECK(es == WGPUStatus_Success, "wgpu: frame EndAccess failed");
+    /* We only ever read the frame, so the layout Dawn leaves it in is
+     * what the next acquire must declare. The producer is V4L2, which
+     * knows nothing of layouts and does not re-transition it. */
+    im->layout = el.newLayout ? el.newLayout : VK_IMAGE_LAYOUT_GENERAL;
+    return c->errors != errors0 ? -1 : 0;
+}
+
+void infer_wgpu_frame_import_destroy(void* p) {
+    struct infer_wgpu_frame_import* im = p;
+    if (!im) { return; }
+    for (int i = 0; i < 2; i++) {
+        if (im->plane[i]) { wgpuTextureViewRelease(im->plane[i]); }
+    }
+    if (im->tex) { wgpuTextureRelease(im->tex); }
+    if (im->mem) { wgpuSharedTextureMemoryRelease(im->mem); }
+    free(im);
+}
+
+/* ------------------------------------------------------------------ */
+/* stage five: the readback, polled instead of waited on              */
+/* ------------------------------------------------------------------ */
+
+enum { RB_IDLE = 0, RB_MAPPING = 1, RB_READY = 2, RB_FAILED = 3 };
+
+struct infer_wgpu_readback {
+    WGPUBuffer staging;
+    size_t capacity; /* allocated, 4-byte aligned */
+    size_t bytes;    /* what the pending submit asked for */
+    int state;
+};
+
+static void on_map_state(WGPUMapAsyncStatus st, WGPUStringView msg, void* u1, void* u2) {
+    (void)u2;
+    if (st != WGPUMapAsyncStatus_Success) { fprintf(stderr, "wgpu map failed: %.*s\n", SV_ARGS(msg)); }
+    *(int*)u1 = st == WGPUMapAsyncStatus_Success ? RB_READY : RB_FAILED;
+}
+
+struct infer_wgpu_readback* infer_wgpu_readback_create(struct infer_ctx_wgpu* c, size_t bytes) {
+    struct infer_wgpu_readback* rb = calloc(1, sizeof *rb);
+    rb->capacity = infer_align(bytes, 4);
+    WGPUBufferDescriptor sd = WGPU_BUFFER_DESCRIPTOR_INIT;
+    sd.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    sd.size = rb->capacity;
+    sd.label = SV("infer polled readback");
+    rb->staging = wgpuDeviceCreateBuffer(c->device, &sd);
+    if (!rb->staging) {
+        free(rb);
+        return NULL;
+    }
+    return rb;
+}
+
+int infer_wgpu_readback_inflight(const struct infer_wgpu_readback* rb) {
+    return rb->state != RB_IDLE;
+}
+
+int infer_wgpu_readback_submit(struct infer_ctx_wgpu* c,
+                              struct infer_wgpu_readback* rb,
+                              WGPUBuffer src,
+                              size_t bytes) {
+    int errors0 = c->errors;
+    /* A MapRead buffer cannot be re-mapped while mapped, and nothing may
+     * be copied into it while mapped: the previous result must have been
+     * drained by poll() first. */
+    INFER_CHECK(rb->state == RB_IDLE, "wgpu: readback already in flight");
+    size_t n = infer_align(bytes, 4);
+    INFER_CHECK(n <= rb->capacity, "wgpu: readback is %zu bytes, needs %zu", rb->capacity, n);
+    rb->bytes = bytes;
+
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(c->device, NULL);
+    wgpuCommandEncoderCopyBufferToBuffer(enc, src, 0, rb->staging, 0, n);
+    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
+    wgpuQueueSubmit(c->queue, 1, &cb);
+    wgpuCommandBufferRelease(cb);
+    wgpuCommandEncoderRelease(enc);
+
+    rb->state = RB_MAPPING;
+    WGPUBufferMapCallbackInfo mi = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
+    /* AllowProcessEvents, not WaitAnyOnly: the callback must be able to
+     * fire from wgpuInstanceProcessEvents in poll() rather than from a
+     * blocking wait -- that is the whole point of this object */
+    mi.mode = WGPUCallbackMode_AllowProcessEvents;
+    mi.callback = on_map_state;
+    mi.userdata1 = &rb->state;
+    wgpuBufferMapAsync(rb->staging, WGPUMapMode_Read, 0, n, mi);
+    return c->errors != errors0 ? -1 : 0;
+}
+
+int infer_wgpu_readback_poll(struct infer_ctx_wgpu* c, struct infer_wgpu_readback* rb, float* dst) {
+    if (rb->state == RB_IDLE) { return 0; }
+    if (rb->state == RB_MAPPING) {
+        wgpuInstanceProcessEvents(c->instance);
+        if (rb->state == RB_MAPPING) { return 0; } /* still on the GPU */
+    }
+    if (rb->state == RB_FAILED) {
+        rb->state = RB_IDLE;
+        return -1;
+    }
+    const void* p = wgpuBufferGetConstMappedRange(rb->staging, 0, infer_align(rb->bytes, 4));
+    if (p) { memcpy(dst, p, rb->bytes); }
+    wgpuBufferUnmap(rb->staging);
+    rb->state = RB_IDLE;
+    return p ? 1 : -1;
+}
+
+void infer_wgpu_readback_destroy(struct infer_wgpu_readback* rb) {
+    if (!rb) { return; }
+    if (rb->state == RB_READY) { wgpuBufferUnmap(rb->staging); }
+    if (rb->staging) { wgpuBufferRelease(rb->staging); }
+    free(rb);
+}

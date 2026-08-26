@@ -321,6 +321,87 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
              COMMAND hello_inference --all --iters 5 --strict
                      --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
     set_tests_properties(infer_zero_copy infer_all_synthetic PROPERTIES LABELS gpu)
+
+    # -----------------------------------------------------------------------
+    # 9. Stage five (README §21): hand tracking. `hand` is the pipeline --
+    #    FrameToTensor (the pass stage four declared and did not write), the
+    #    two MediaPipe models behind stage four's engine seam, and the
+    #    decoding that turns their tensors into landmarks. Everything lives
+    #    inside this guard, and the stage-three cam_* binaries are NOT
+    #    touched: a machine without ORT/Dawn still builds all four of them.
+    # -----------------------------------------------------------------------
+    find_package(Threads REQUIRED) # the CPU EP runs on a worker thread
+    embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/hand_frame_to_tensor_wgsl.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hand_frame_to_tensor.wgsl
+               hand_frame_to_tensor_wgsl)
+
+    add_library(hand STATIC hand/hand.h hand/hand_frame.h hand/hand_affine.h hand/hand_model.h
+                            hand/hand_overlay.h hand/hand_tracker.h
+                            hand/hand_decode.c hand/hand_model.c hand/hand_tracker.c
+                            hand/hand_frame_cpu.c hand/hand_frame_wgpu.c)
+    target_include_directories(hand PUBLIC hand PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_link_libraries(hand PUBLIC infer camera Threads::Threads m)
+
+    add_executable(hello_hand hello/hello_hand.c)
+    target_link_libraries(hello_hand PRIVATE hand)
+    set_target_properties(hello_hand PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+
+    # The fixture is a raw NV12 frame captured by hello_hand --dump-frame the
+    # moment a real detection happened, so the tests below are reproducible.
+    # A live camera shows something different every run, which is fine for a
+    # demo and useless for a test.
+    set(HAND_FIXTURE ${CMAKE_CURRENT_SOURCE_DIR}/testdata/hand_640x360.nv12)
+    # ctest runs from the build dir, so the models need absolute paths --
+    # the same reason stage four's tests spell out --model
+    set(HAND_MODELS --palm ${CMAKE_CURRENT_SOURCE_DIR}/models/palm_detection_lite.onnx
+                    --landmark ${CMAKE_CURRENT_SOURCE_DIR}/models/hand_landmark_lite.onnx)
+    set(HAND_FRAME --frame ${HAND_FIXTURE} --size 640x360 --crop)
+    # the arithmetic: no camera, no model, no GPU, so it runs anywhere
+    add_test(NAME hand_selftest COMMAND hello_hand --self-test --strict)
+    # the CPU EP end to end on a frame that definitely has a hand in it
+    add_test(NAME hand_cpu
+             COMMAND hello_hand ${HAND_FRAME} ${HAND_MODELS}
+                     --stage landmark --ep cpu --iters 2 --warmup 1 --strict)
+    # the GPU FrameToTensor pass against its C twin: if these two agree, an
+    # EP disagreement downstream is the model's and not the input's
+    add_test(NAME hand_frame_agree
+             COMMAND hello_hand ${HAND_FRAME} --compare-frame-to-tensor --strict)
+    # the acceptance test: both providers must find the same hand
+    add_test(NAME hand_both
+             COMMAND hello_hand ${HAND_FRAME} ${HAND_MODELS}
+                     --both --iters 2 --warmup 1 --strict)
+    set_tests_properties(hand_frame_agree hand_both PROPERTIES LABELS gpu)
+
+    # The windowed scenes: the SAME three stage-three sources, compiled a
+    # second time with SCENE_HAND=1. cam_* above are untouched, which is
+    # the point -- the hand hooks are call sites, not a fork. The pattern
+    # is the one CAM_GLES_MODE already establishes.
+    add_spirv_shaders(OVERLAY_SPV overlay.vert overlay.frag) # only the new ones: ${CAM_SPV}
+    add_executable(hand_vulkan scenes/scene_cam_vk.c hand/hand_overlay_vk.c
+                               scenes/cube_mesh.h scenes/mat4.h ${CAM_SPV} ${OVERLAY_SPV})
+    target_compile_definitions(hand_vulkan PRIVATE SHADER_DIR="${SHADER_OUT_DIR}" SCENE_HAND=1)
+    target_include_directories(hand_vulkan PRIVATE scenes)
+    target_link_libraries(hand_vulkan PRIVATE vk_present camera hand PkgConfig::LIBDRM)
+    set_target_properties(hand_vulkan PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+
+    add_executable(hand_shm scenes/scene_cam_shm.c hand/hand_overlay_cpu.c
+                            scenes/raster.h scenes/cube_mesh.h scenes/mat4.h)
+    target_compile_definitions(hand_shm PRIVATE SCENE_HAND=1)
+    target_include_directories(hand_shm PRIVATE scenes)
+    target_link_libraries(hand_shm PRIVATE shm_present camera hand m)
+    set_target_properties(hand_shm PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+
+    foreach(m DMABUF EGLSURFACE)
+        string(TOLOWER ${m} ml)
+        add_executable(hand_gles_${ml} scenes/scene_cam_gles.c hand/hand_overlay_gles.c
+                                       scenes/cube_mesh.h scenes/mat4.h)
+        target_compile_definitions(hand_gles_${ml}
+                                   PRIVATE CAM_GLES_MODE=GLES_MODE_${m} SCENE_HAND=1)
+        target_include_directories(hand_gles_${ml} PRIVATE ${CMAKE_CURRENT_BINARY_DIR} scenes)
+        target_link_libraries(hand_gles_${ml} PRIVATE gles_present camera hand)
+        set_target_properties(hand_gles_${ml} PROPERTIES
+                              BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+    endforeach()
 else()
     message(WARNING "onnxruntime with WebGPU not found under ORT_ROOT=${ORT_ROOT} "
                     "(or no GLSL compiler): skipping infer / hello_inference")

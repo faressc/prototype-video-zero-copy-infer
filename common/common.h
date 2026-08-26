@@ -126,6 +126,14 @@ struct app {
     int effect, effect_count;
     int mode; /* C toggles a scene-defined mode (the camera scenes: on the cube) */
 
+    /* Stage five's two knobs, in the same spirit as `mode`: common bumps
+     * them, the scene decides what they mean. P counts provider switches
+     * (the hand scenes alternate CPU / WebGPU); H toggles the landmark
+     * overlay, on by default. Scenes that know nothing about either
+     * simply never read them. */
+    int infer_ep;
+    int overlay;
+
     int running;
 };
 

@@ -38,6 +38,15 @@
 #define CAM_GLES_MODE GLES_MODE_DMABUF
 #endif
 
+/* Stage five (README §21), compiled in for the hand_* binaries only:
+ * cam_gles_* stay exactly what stage three made them. Everything real
+ * lives in hand/ and scenes/scene_hand.h -- what is left here is call
+ * sites. */
+#if SCENE_HAND
+#include "hand_overlay_gles.h"
+#include "scene_hand.h"
+#endif
+
 /* the uniforms every pass program has (fullscreen and cube alike) */
 struct pass_uniforms {
     GLint u_cam, u_tmp0, u_tmp1, u_texel, u_time, u_effect, u_src;
@@ -61,6 +70,12 @@ struct cam_scene {
     GLuint cube_program, vbo, ibo; /* the cube as the last pass */
     GLint c_pos, c_normal, c_uv, c_mvp, c_model, c_uv_scale;
     struct pass_uniforms cu;
+#if SCENE_HAND
+    struct hand_scene hand;
+    struct hand_overlay_gles hand_gl;
+    int argc;
+    char** argv;
+#endif
 };
 
 /* ------------------------------------------------------------------ */
@@ -69,7 +84,23 @@ struct cam_scene {
 
 static int egl_fence_done(void* fence, void* user) {
     struct gles_presenter* p = user;
-    return eglClientWaitSync(p->egl_display, (EGLSync)fence, 0, 0) == EGL_CONDITION_SATISFIED;
+    if (eglClientWaitSync(p->egl_display, (EGLSync)fence, 0, 0) != EGL_CONDITION_SATISFIED) {
+        return 0;
+    }
+#if SCENE_HAND
+    /* Stage five adds a SECOND reader of the same dma-buf: the tracker's
+     * worker may still be feeding it to a model. cam_stream keeps one
+     * fence per buffer and its meaning is ours to define, so "done" is
+     * the conjunction -- which is why camera/cam_stream.[ch] needed no
+     * change for any of this. */
+    struct cam_scene* s = p->user;
+    /* the index is recoverable from the fence slot: cam_stream asks about
+     * exactly the buffer this fence belongs to */
+    for (uint32_t i = 0; i < CAM_MAX_BUFFERS; i++) {
+        if (s->stream.fence[i] == fence) { return !hand_scene_holds(&s->hand, (int)i); }
+    }
+#endif
+    return 1;
 }
 
 static void egl_fence_destroy(void* fence, void* user) {
@@ -428,6 +459,10 @@ static void cam_init(struct gles_presenter* p, void* user) {
     p->app.aux_fd = cam_stream_fd(&s->stream);
     p->app.on_aux_fd = on_cam_fd;
     p->app.effect_count = FX_COUNT;
+#if SCENE_HAND
+    if (hand_scene_init(&s->hand, &s->stream, s->argc, s->argv) < 0) { exit(2); }
+    hand_overlay_gles_init(&s->hand_gl);
+#endif
 }
 
 /* One effect pass over the viewport rectangle: program, uniforms, one
@@ -518,6 +553,11 @@ static void cam_draw(struct gles_presenter* p, const struct gles_target* t, void
     int latest = cam_stream_latest(&s->stream);
     if (latest < 0) { return; }
 
+#if SCENE_HAND
+    /* feed the worker, collect whatever it finished, rebuild the geometry */
+    hand_scene_update(&s->hand, &p->app, &s->stream, latest);
+#endif
+
     /* letterbox rectangle, in GL window coordinates */
     float sx = (float)t->width / (float)s->cw, sy = (float)t->height / (float)s->ch;
     float sc = sx < sy ? sx : sy;
@@ -539,6 +579,39 @@ static void cam_draw(struct gles_presenter* p, const struct gles_target* t, void
     int n = effect_chain_passes(p->app.effect, passes);
     const float time = (float)(p->app.anim_ms * 0.001);
     int src = 0;
+#if SCENE_HAND
+    /* Cube mode: draw the skeleton into the chain's scratch at CAMERA
+     * resolution, before the last pass, and the cube samples it along
+     * with the image -- so the overlay sticks to the rotating face for
+     * free, instead of needing the landmarks projected through the MVP.
+     * The costs are honest and small: the overlay picks up the cube's
+     * lighting term, and the face's centre-crop (u_uv_scale) hides
+     * whatever falls outside the crop.
+     *
+     * A chain that produced nothing (PASS_NONE, src == 0) has no scratch
+     * to draw into, so one passthrough is forced first. */
+    const int overlay_into_scratch = p->app.mode && s->hand.vert_count > 0;
+    if (overlay_into_scratch) {
+        int k;
+        if (src == 0) {
+            glBindFramebuffer(GL_FRAMEBUFFER, s->tmp_fbo[0]);
+            draw_fullscreen(s, 0, 0, (int)s->cw, (int)s->ch, 0.0f, PASS_NONE, 0, time);
+            k = 0;
+            src = 1;
+        } else {
+            k = src - 1;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, s->tmp_fbo[k]);
+        glViewport(0, 0, (int)s->cw, (int)s->ch);
+        /* the whole scratch. The chain always writes it with flip 0
+         * (draw_fullscreen(..., 0.0f, ...) above), so the image's first
+         * row sits at NDC bottom and the overlay must follow. */
+        float sx, sy, ox, oy;
+        hand_overlay_gles_rect(0, 0, (int)s->cw, (int)s->ch, (int)s->cw, (int)s->ch, 1, &sx, &sy,
+                               &ox, &oy);
+        hand_overlay_gles_draw(&s->hand_gl, s->hand.verts, s->hand.vert_count, sx, sy, ox, oy);
+    }
+#endif
     for (int i = 0; i < n; i++) {
         const int last = i == n - 1;
         if (!last) {
@@ -554,6 +627,31 @@ static void cam_draw(struct gles_presenter* p, const struct gles_target* t, void
         }
     }
 
+#if SCENE_HAND
+    /* Fullscreen mode: straight onto the window, over the letterboxed
+     * image, mapping [0,1]^2 to the same rectangle the image went into.
+     * (In cube mode the overlay already went into the scratch above.) */
+    if (!p->app.mode && s->hand.vert_count > 0) {
+        glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
+        glViewport(0, 0, t->width, t->height);
+        /* the same rectangle draw_fullscreen just put the image in, and
+         * the same vertical convention: it was called with flip
+         * `p->y_down ? 0 : 1`, and flip 0 is what puts the image's first
+         * row at NDC bottom */
+        float sx2, sy2, ox2, oy2;
+        hand_overlay_gles_rect(x0, y0, dw, dh, t->width, t->height, p->y_down ? 1 : 0, &sx2, &sy2,
+                               &ox2, &oy2);
+        if (s->hand.opt.overlay_test && !s->hand.logged_rect) {
+            s->hand.logged_rect = 1;
+            fprintf(stderr,
+                    "hand: overlay rect: target %dx%d, image %dx%d at (%d,%d), y_down %d\n"
+                    "      scale (%.4f, %.4f) offset (%.4f, %.4f)\n",
+                    t->width, t->height, dw, dh, x0, y0, p->y_down, sx2, sy2, ox2, oy2);
+        }
+        hand_overlay_gles_draw(&s->hand_gl, s->hand.verts, s->hand.vert_count, sx2, sy2, ox2, oy2);
+    }
+#endif
+
     /* the fence: signals when everything queued so far -- including
      * the reads of textures[latest] -- has executed on the GPU. The
      * presenter's glFlush after us submits it. */
@@ -563,6 +661,11 @@ static void cam_draw(struct gles_presenter* p, const struct gles_target* t, void
 
 static void cam_fini(struct gles_presenter* p, void* user) {
     struct cam_scene* s = user;
+#if SCENE_HAND
+    /* before the camera closes: the worker may hold one of its buffers */
+    hand_scene_fini(&s->hand);
+    hand_overlay_gles_fini(&s->hand_gl);
+#endif
     cam_stream_close(&s->stream);
     for (uint32_t i = 0; i < CAM_MAX_BUFFERS; i++) {
         if (s->textures[i]) { glDeleteTextures(1, &s->textures[i]); }
@@ -583,18 +686,34 @@ static const struct gles_scene cam_scene = {
     .fini = cam_fini,
 };
 
-int main(void) {
+int main(int argc, char** argv) {
     struct cam_scene s = {0};
     struct gles_presenter p;
     const int dmabuf = CAM_GLES_MODE == GLES_MODE_DMABUF;
+#if SCENE_HAND
+    /* the scene's init runs inside gles_present_init (and, in EGLSurface
+     * mode, not until the first configure), so argv is stashed rather
+     * than parsed here */
+    s.argc = argc;
+    s.argv = argv;
+#else
+    (void)argc;
+    (void)argv;
+#endif
     if (gles_present_init(
             &p,
             CAM_GLES_MODE,
             GLES_PRESENT_DEPTH,
             &cam_scene,
             &s,
+#if SCENE_HAND
+            dmabuf ? "hand tracking (GLES/dmabuf)" : "hand tracking (GLES/EGLSurface)",
+            dmabuf ? "hello-wayland-hand-gles-dmabuf" : "hello-wayland-hand-gles-eglsurface"
+#else
             dmabuf ? "camera (GLES/dmabuf)" : "camera (GLES/EGLSurface)",
-            dmabuf ? "hello-wayland-cam-gles-dmabuf" : "hello-wayland-cam-gles-eglsurface") < 0) {
+            dmabuf ? "hello-wayland-cam-gles-dmabuf" : "hello-wayland-cam-gles-eglsurface"
+#endif
+            ) < 0) {
         return 1;
     }
     gles_present_run(&p);

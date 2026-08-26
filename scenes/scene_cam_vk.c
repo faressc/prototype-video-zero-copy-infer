@@ -47,6 +47,13 @@
 #include "nv12_convert.h"
 #include "vk_present.h"
 
+/* Stage five (README §21), compiled in for hand_vulkan only: cam_vulkan
+ * stays exactly what stage three made it. */
+#if SCENE_HAND
+#include "hand_overlay_vk.h"
+#include "scene_hand.h"
+#endif
+
 #ifndef SHADER_DIR
 #define SHADER_DIR "./shaders"
 #endif
@@ -112,6 +119,12 @@ struct cam_scene {
     VkDeviceMemory vbo_mem, ibo_mem;
     VkPipelineLayout cube_layout;
     VkPipeline cube_pipeline;
+#if SCENE_HAND
+    struct hand_scene hand;
+    struct hand_overlay_vk hand_vk;
+    int argc;
+    char** argv;
+#endif
 };
 
 /* ------------------------------------------------------------------ */
@@ -119,7 +132,19 @@ struct cam_scene {
 /* ------------------------------------------------------------------ */
 
 static int serial_done(void* fence, void* user) {
-    return vk_present_serial_done(user, (uint64_t)(uintptr_t)fence);
+    if (!vk_present_serial_done(user, (uint64_t)(uintptr_t)fence)) { return 0; }
+#if SCENE_HAND
+    /* Stage five adds a second, asynchronous reader of the same dma-buf:
+     * the tracker's worker. cam_stream keeps one fence per buffer and its
+     * meaning is ours to define, so "done" is the conjunction -- which is
+     * why camera/cam_stream.[ch] needed no change for any of this. */
+    struct vk_presenter* p = user;
+    struct cam_scene* s = p->user;
+    for (uint32_t i = 0; i < CAM_MAX_BUFFERS; i++) {
+        if (s->stream.fence[i] == fence) { return !hand_scene_holds(&s->hand, (int)i); }
+    }
+#endif
+    return 1;
 }
 
 static const struct cam_fence_ops serial_fence_ops = {.done = serial_done, .destroy = NULL};
@@ -752,6 +777,10 @@ static void cam_init(struct vk_presenter* p, void* user) {
     p->app.aux_fd = cam_stream_fd(&s->stream);
     p->app.on_aux_fd = on_cam_fd;
     p->app.effect_count = FX_COUNT;
+#if SCENE_HAND
+    if (hand_scene_init(&s->hand, &s->stream, s->argc, s->argv) < 0) { exit(2); }
+    hand_overlay_vk_init(&s->hand_vk, p);
+#endif
 }
 
 /* One fullscreen pass with the flat pipeline into whatever rendering
@@ -929,6 +958,10 @@ static void cam_record(struct vk_presenter* p, const struct vk_frame* fr, void* 
      * A/B) and writes scratch i&1 -- a rendering instance per pass,
      * with the scratch flipped to an attachment before and back to a
      * texture after. The last pass goes to the window, or the cube. */
+#if SCENE_HAND
+    hand_scene_update(&s->hand, &p->app, &s->stream, have ? latest : -1);
+#endif
+
     int passes[EFFECT_MAX_PASSES];
     int n = have ? effect_chain_passes(p->app.effect, passes) : 0;
     for (int i = 0; i + 1 < n; i++) {
@@ -975,6 +1008,71 @@ static void cam_record(struct vk_presenter* p, const struct vk_frame* fr, void* 
     }
     if (n > 0) { push.effect = passes[n - 1]; }
 
+#if SCENE_HAND
+    /* Cube mode: the skeleton goes into the effect chain's scratch at
+     * CAMERA resolution and the cube's sampler carries it onto the
+     * rotating face -- no landmark has to be projected through the MVP.
+     * A chain that produced nothing (push.src == 0) has no scratch to
+     * draw into, so one passthrough is forced first. */
+    if (have && p->app.mode && s->hand.vert_count > 0) {
+        int d = push.src ? push.src - 1 : 0;
+        if (!push.src) {
+            struct cam_push pass = push;
+            pass.effect = PASS_NONE;
+            image_barrier(cmd, s->tmp_image[d], VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
+                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_QUEUE_FAMILY_IGNORED,
+                          VK_QUEUE_FAMILY_IGNORED);
+        } else {
+            /* it is SHADER_READ_ONLY after the chain; make it writable */
+            image_barrier(cmd, s->tmp_image[d], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT,
+                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                          VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_QUEUE_FAMILY_IGNORED,
+                          VK_QUEUE_FAMILY_IGNORED);
+        }
+        VkRenderingAttachmentInfo att = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = s->tmp_view[d],
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            /* LOAD, not DONT_CARE: the image already holds the picture */
+            .loadOp = push.src ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        };
+        VkRenderingInfo ri = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = {{0, 0}, {s->cw, s->ch}},
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &att,
+        };
+        vkCmdBeginRendering(cmd, &ri);
+        if (!push.src) {
+            struct cam_push pass = push;
+            pass.effect = PASS_NONE;
+            draw_fullscreen(s, cmd, s->sets[set_index], &pass, (VkRect2D){{0, 0}, {s->cw, s->ch}});
+        }
+        VkViewport vpt = {0.0f, 0.0f, (float)s->cw, (float)s->ch, 0.0f, 1.0f};
+        VkRect2D sci = {{0, 0}, {s->cw, s->ch}};
+        vkCmdSetViewport(cmd, 0, 1, &vpt);
+        vkCmdSetScissor(cmd, 0, 1, &sci);
+        /* Vulkan NDC y already points down, and the scratch stores row 0
+         * first, so frame-normalised maps straight through */
+        hand_overlay_vk_draw(&s->hand_vk, fr, s->hand.verts, s->hand.vert_count, 2.0f, 2.0f, -1.0f,
+                             -1.0f);
+        vkCmdEndRendering(cmd);
+        image_barrier(cmd, s->tmp_image[d], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                      VK_ACCESS_SHADER_READ_BIT, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED);
+        push.src = 1 + d;
+    }
+#endif
+
     if (have && p->app.mode) {
         draw_cube(p, s, fr, s->sets[set_index], &push);
     } else {
@@ -1004,6 +1102,23 @@ static void cam_record(struct vk_presenter* p, const struct vk_frame* fr, void* 
                 {(int32_t)(fr->extent.width - dw) / 2, (int32_t)(fr->extent.height - dh) / 2},
                 {dw, dh}};
             draw_fullscreen(s, cmd, s->sets[set_index], &push, rect);
+#if SCENE_HAND
+            if (s->hand.vert_count > 0) {
+                /* the same rectangle the image just went into. Vulkan's
+                 * NDC y points down, as the frame's does, so this is the
+                 * plain mapping with no vertical question to get wrong. */
+                VkViewport vpt = {0.0f, 0.0f, (float)fr->extent.width,
+                                  (float)fr->extent.height, 0.0f, 1.0f};
+                VkRect2D sci = {{0, 0}, fr->extent};
+                vkCmdSetViewport(cmd, 0, 1, &vpt);
+                vkCmdSetScissor(cmd, 0, 1, &sci);
+                const float w = (float)fr->extent.width, hh = (float)fr->extent.height;
+                hand_overlay_vk_draw(&s->hand_vk, fr, s->hand.verts, s->hand.vert_count,
+                                     2.0f * (float)dw / w, 2.0f * (float)dh / hh,
+                                     2.0f * (float)rect.offset.x / w - 1.0f,
+                                     2.0f * (float)rect.offset.y / hh - 1.0f);
+            }
+#endif
         }
         vkCmdEndRendering(cmd);
     }
@@ -1026,6 +1141,10 @@ static void cam_record(struct vk_presenter* p, const struct vk_frame* fr, void* 
 
 static void cam_fini(struct vk_presenter* p, void* user) {
     struct cam_scene* s = user;
+#if SCENE_HAND
+    hand_scene_fini(&s->hand); /* before the camera: the worker may hold a buffer */
+    hand_overlay_vk_fini(&s->hand_vk, p);
+#endif
     cam_stream_close(&s->stream);
     vkDestroyPipeline(p->device, s->cube_pipeline, NULL);
     vkDestroyPipelineLayout(p->device, s->cube_layout, NULL);
@@ -1066,15 +1185,28 @@ static const struct vk_scene cam_scene = {
     .fini = cam_fini,
 };
 
-int main(void) {
+int main(int argc, char** argv) {
     struct cam_scene s = {0};
     struct vk_presenter p;
+#if SCENE_HAND
+    s.argc = argc;
+    s.argv = argv;
+#else
+    (void)argc;
+    (void)argv;
+#endif
     if (vk_present_init(&p,
                         VK_PRESENT_CAMERA_IMPORT | VK_PRESENT_DEPTH,
                         &cam_scene,
                         &s,
+#if SCENE_HAND
+                        "hand tracking (Vulkan)",
+                        "hello-wayland-hand-vulkan"
+#else
                         "camera (Vulkan)",
-                        "hello-wayland-cam-vulkan") < 0) {
+                        "hello-wayland-cam-vulkan"
+#endif
+                        ) < 0) {
         return 1;
     }
     vk_present_run(&p);
