@@ -21,7 +21,8 @@
 #   ORT_ROOT  DAWN_ROOT    install prefixes. ORT_ROOT defaults per variant:
 #             ~/opt/onnxruntime-webgpu-extdawn without CUDA,
 #             ~/opt/onnxruntime-webgpu-cuda with it -- so the two builds
-#             coexist and the app picks one with -DORT_ROOT=
+#             coexist; the app defaults to the CUDA one once it exists
+#             (-DORT_ROOT= picks the other)
 #   ORT_JOBS  DAWN_JOBS    build parallelism
 #   CC        CXX          compilers (default: whichever clang is installed)
 #   DAWN_PICKS upstream Dawn commits to apply on top of the pinned tag
@@ -48,8 +49,11 @@ ORT_SRC=${ORT_SRC:-$HOME/self-builds/onnxruntime}
 DAWN_SRC=${DAWN_SRC:-$HOME/self-builds/dawn}
 ORT_ROOT=${ORT_ROOT:-} # resolved below: the default prefix depends on ORT_CUDA
 DAWN_ROOT=${DAWN_ROOT:-$HOME/opt/dawn}
-ORT_JOBS=${ORT_JOBS:-4}
-DAWN_JOBS=${DAWN_JOBS:-$(nproc)}
+# Both default to all cores but one, so the machine stays usable during a
+# 15-30 minute build. ORT's CUDA translation units are memory-hungry; lower
+# ORT_JOBS= if a full-width build exhausts RAM.
+ORT_JOBS=${ORT_JOBS:-$(( $(nproc) - 1 > 0 ? $(nproc) - 1 : 1 ))}
+DAWN_JOBS=${DAWN_JOBS:-$(( $(nproc) - 1 > 0 ? $(nproc) - 1 : 1 ))}
 # Upstream fixes that landed after the tag ORT pins, applied to the working
 # tree as unmodified cherry-picks. Each entry must be a commit already on
 # Dawn's main branch, never a local invention, so the list empties itself
@@ -117,8 +121,9 @@ if [ "$ORT_CUDA" = 1 ] && ! nvidia-smi -L >/dev/null 2>&1; then
 fi
 # Each variant gets its own install prefix, so the CUDA build never
 # overwrites the plain WebGPU one and the two can sit side by side
-# (point the app at either with -DORT_ROOT=). An explicit ORT_ROOT=
-# still overrides both defaults.
+# (the app's CMakeLists defaults to the CUDA prefix once it exists;
+# -DORT_ROOT= points it at either). An explicit ORT_ROOT= here still
+# overrides both defaults.
 if [ -z "$ORT_ROOT" ]; then
     if [ "$ORT_CUDA" = 1 ]; then
         ORT_ROOT=$HOME/opt/onnxruntime-webgpu-cuda
@@ -306,9 +311,14 @@ step_dawn() {
           -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF -DTINT_BUILD_TESTS=OFF \
           -DTINT_BUILD_CMD_TOOLS=OFF -DTINT_BUILD_SPV_READER=OFF \
           -DCMAKE_INSTALL_PREFIX="$DAWN_ROOT"
+    # The stamp means "these build files were configured from $stamp", so it
+    # is written right after configure, not after the build: an interrupted
+    # build (Ctrl-C, OOM kill, power cut) then resumes incrementally next
+    # time instead of being wiped as "a different revision". A pin move still
+    # mismatches the stamp and triggers the wipe as before.
+    echo "$stamp" > "$build/.build-deps-stamp"
     cmake --build "$build" -j "$DAWN_JOBS"
     cmake --install "$build"
-    echo "$stamp" > "$build/.build-deps-stamp"
 }
 
 # cuDNN 9 for CUDA 13, from NVIDIA's public redist (no login), into a
@@ -398,16 +408,23 @@ step_ort() {
         log "CUDA EP on: toolkit $CUDA_HOME, cuDNN $CUDNN_ROOT, archs ${CUDA_ARCHS:-ORT default} -> $ORT_ROOT"
     fi
     [ -x "$ORT_SRC/.venv/bin/python" ] && PATH="$ORT_SRC/.venv/bin:$PATH"
+    # Stamp before the build, same reasoning as step_dawn. build.sh runs
+    # configure and build in one go, so the nearest point after the clean
+    # decision is here: the revisions the stamp records are already fixed,
+    # and whatever objects an interrupted run leaves behind come from them.
+    # (On the clean path the dir was just removed; a stamp with no
+    # build.ninja next to it reads as "no previous build" and is wiped.)
+    mkdir -p "$build"
+    echo "$stamp" > "$build/.build-deps-stamp"
     (cd "$ORT_SRC" && CC="$CC" CXX="$CXX" ./build.sh \
         --config Release --build_dir "$dir" \
         --build_shared_lib --use_webgpu --use_external_dawn "${cuda_flags[@]}" \
-        --parallel "$ORT_JOBS" --skip_tests \
+        --parallel "$ORT_JOBS" --nvcc_threads 1 --skip_tests \
         --compile_no_warning_as_error --cmake_generator Ninja \
         --cmake_extra_defines "onnxruntime_CUSTOM_DAWN_SRC_PATH=$DAWN_SRC" \
                               onnxruntime_BUILD_UNIT_TESTS=OFF \
                               "CMAKE_INSTALL_PREFIX=$ORT_ROOT" "${cuda_defines[@]}")
     cmake --install "$build"
-    echo "$stamp" > "$build/.build-deps-stamp"
 
     # Two Dawns in one process cannot share a device: ORT must link no
     # Dawn implementation and export no wgpu symbols that could interpose

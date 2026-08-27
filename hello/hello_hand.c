@@ -44,7 +44,7 @@ struct options {
     const char* dump_path;
     uint32_t want_w, want_h;
     uint32_t tensor;
-    int crop, self_test, probe, compare, strict, verbose, iters, warmup, both, require_hand, chain;
+    int crop, self_test, probe, compare, strict, verbose, iters, warmup, all, require_hand, chain;
     struct hand_roi roi;
     int have_roi;
     struct hand_norm norm;
@@ -1031,11 +1031,13 @@ out:
 
 static void usage(void) {
     fprintf(stderr,
-            "usage: hello_hand [--ep cpu|webgpu|cuda] [--stage frame|detect|landmark]\n"
+            "usage: hello_hand [--ep cpu|webgpu|cuda] [--all] [--stage frame|detect|landmark]\n"
             "                  [--self-test] [--probe] [--compare-frame-to-tensor]\n"
             "                  [--frame raw.nv12 --size WxH] [--size WxH] [--tensor N]\n"
             "                  [--crop] [--range 0|1] [--ppm out.ppm] [--iters N]\n"
             "                  [--strict] [--verbose]\n"
+            "       --all runs the cpu EP and then every GPU EP on the same frame and\n"
+            "       compares what they found (the acceptance test).\n"
             "       --frame reads a raw NV12 fixture (stride == width) instead of the\n"
             "       camera; --crop centre-crops instead of letterboxing; --range 1\n"
             "       feeds [-1,1] instead of [0,1]; --tensor sets the model input side.\n");
@@ -1081,8 +1083,8 @@ int main(int argc, char** argv) {
             o.chain = 1;
         } else if (!strcmp(s, "--require-hand")) {
             o.require_hand = 1;
-        } else if (!strcmp(s, "--both")) {
-            o.both = 1;
+        } else if (!strcmp(s, "--all")) {
+            o.all = 1;
             if (o.stage == STAGE_FRAME) { o.stage = STAGE_LANDMARK; }
         } else if (!strcmp(s, "--strict")) {
             o.strict = 1;
@@ -1165,7 +1167,7 @@ int main(int argc, char** argv) {
         }
         if (o.stage == STAGE_FRAME) {
             bad += stage_frame(&src, &o);
-        } else if (o.both) {
+        } else if (o.all) {
             /* The acceptance test: the same frame through the CPU
              * provider and every GPU provider must find the same hand.
              * fp32 kernels in a different order on a different device

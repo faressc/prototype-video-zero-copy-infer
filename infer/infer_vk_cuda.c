@@ -198,6 +198,10 @@ struct vk_cuda_bridge {
     VkDeviceSize size;
     VkCommandBuffer cmd; /* our own: the ctx's c->cmd is for synchronous users */
     VkFence fence;
+    VkFence armed_fence; /* the fence the last cmd submit carried: ours
+                          * (to_cuda) or the consumer tensor's own
+                          * (from_cuda -- infer_vk_readback waits THAT
+                          * one, per the !first_write contract) */
     int fence_armed;
     VkSemaphore vk_done;     /* VK signals, CUDA waits (opaque fd) */
     VkSemaphore cuda_done;   /* CUDA signals, VK waits (opaque fd) */
@@ -221,7 +225,7 @@ static uint32_t mem_type_of(const VkPhysicalDeviceMemoryProperties* p,
 static void bridge_destroy(void* p) {
     struct vk_cuda_bridge* b = p;
     if (!b) { return; }
-    if (b->fence_armed) { vkWaitForFences(b->dev, 1, &b->fence, VK_TRUE, UINT64_MAX); }
+    if (b->fence_armed) { vkWaitForFences(b->dev, 1, &b->armed_fence, VK_TRUE, UINT64_MAX); }
     if (b->cuda) { cudaStreamSynchronize((cudaStream_t)b->cuda->stream); }
     if (b->ext_vk_done) { cudaDestroyExternalSemaphore(b->ext_vk_done); }
     if (b->ext_cuda_done) { cudaDestroyExternalSemaphore(b->ext_cuda_done); }
@@ -713,13 +717,14 @@ static int vk_copy(struct infer_ctx_vk* v,
                    int to_staging,
                    VkSemaphore wait,
                    const VkSemaphore* sig,
-                   uint32_t nsig) {
+                   uint32_t nsig,
+                   VkFence fence) {
     struct infer_mem_vk* m = &t->mem.vk;
     if (b->fence_armed) {
-        VK_CHECK(vkWaitForFences(b->dev, 1, &b->fence, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkWaitForFences(b->dev, 1, &b->armed_fence, VK_TRUE, UINT64_MAX));
         b->fence_armed = 0;
     }
-    VK_CHECK(vkResetFences(b->dev, 1, &b->fence));
+    VK_CHECK(vkResetFences(b->dev, 1, &fence));
     VK_CHECK(vkResetCommandBuffer(b->cmd, 0));
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
@@ -766,7 +771,8 @@ static int vk_copy(struct infer_ctx_vk* v,
         .signalSemaphoreCount = nsig,
         .pSignalSemaphores = sig,
     };
-    VK_CHECK(vkQueueSubmit(v->queue, 1, &si, b->fence));
+    VK_CHECK(vkQueueSubmit(v->queue, 1, &si, fence));
+    b->armed_fence = fence;
     b->fence_armed = 1;
     return 0;
 }
@@ -791,7 +797,9 @@ int infer_vk_cuda_to_cuda(struct infer_ctx* c,
         VK_CHECK(vkWaitForFences(c->vk.device, 1, &src->mem.vk.fence, VK_TRUE, UINT64_MAX));
     }
     VkSemaphore sig[2] = {b->vk_done, b->release_sem};
-    if (vk_copy(&c->vk, b, src, 1, VK_NULL_HANDLE, sig, b->has_release ? 2u : 1u) < 0) { return -1; }
+    if (vk_copy(&c->vk, b, src, 1, VK_NULL_HANDLE, sig, b->has_release ? 2u : 1u, b->fence) < 0) {
+        return -1;
+    }
     if (b->has_release) {
         VkSemaphoreGetFdInfoKHR gfi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
                                        .semaphore = b->release_sem,
@@ -834,7 +842,11 @@ int infer_vk_cuda_from_cuda(struct infer_ctx* c,
     CUDA_CHECK(cudaSignalExternalSemaphoresAsync(&b->ext_cuda_done, &sp, 1, s));
     VkSemaphore sig[1] = {dst->mem.vk.done};
     const uint32_t nsig = c->vk.has_sync_fd ? 1u : 0u;
-    if (vk_copy(&c->vk, b, dst, 0, b->cuda_done, sig, nsig) < 0) { return -1; }
+    /* the submit carries the TENSOR's fence: setting first_write = 0
+     * below promises infer_vk_readback (and vk->cuda's source wait) a
+     * fence the last writer armed, and the bridge's own fence is not
+     * the one they look at */
+    if (vk_copy(&c->vk, b, dst, 0, b->cuda_done, sig, nsig, dst->mem.vk.fence) < 0) { return -1; }
     dst->mem.vk.first_write = 0;
     if (nsig) {
         VkSemaphoreGetFdInfoKHR gfi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
@@ -844,7 +856,7 @@ int infer_vk_cuda_from_cuda(struct infer_ctx* c,
         if (c->vk.get_semaphore_fd(c->vk.device, &gfi, &fd) != VK_SUCCESS) { fd = -1; }
         infer_sync_set(&dst->ready, fd);
     } else {
-        VK_CHECK(vkWaitForFences(b->dev, 1, &b->fence, VK_TRUE, UINT64_MAX));
+        VK_CHECK(vkWaitForFences(b->dev, 1, &dst->mem.vk.fence, VK_TRUE, UINT64_MAX));
         b->fence_armed = 0;
         infer_sync_set(&dst->ready, -1);
     }

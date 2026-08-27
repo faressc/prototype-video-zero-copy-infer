@@ -42,8 +42,7 @@ enum { HAND_MAX_FRAME_IMPORTS = 8 };
 
 struct hand_options {
     enum infer_ep ep; /* the provider in use */
-    int both;         /* build cpu + webgpu up front so P can switch instantly */
-    int all;          /* build every provider that comes up */
+    int all;          /* build every provider that comes up so P can switch instantly */
     int crop;         /* square-crop the frame instead of letterboxing it */
     int detect_only;  /* skip the landmark stage */
     int num_hands;    /* MediaPipe's num_hands: gates the detector (see --hands) */
@@ -60,7 +59,7 @@ struct hand_options {
     const char* lmk_model;
 };
 
-/* --ep cpu|webgpu|cuda|both|all, --crop, --detect-only, --detect-every N,
+/* --ep cpu|webgpu|cuda|all, --crop, --detect-only, --detect-every N,
  * --palm/--landmark PATH, --full, --verbose. HAND_EP=... supplies the
  * default, matching the camera's CAM_DEVICE / CAM_SIZE knobs. Returns 0,
  * or -1 after printing usage. */
@@ -116,7 +115,7 @@ int hand_tracker_poll(struct hand_tracker* h, struct hand_results* out);
 int hand_tracker_holds(const struct hand_tracker* h, int index);
 
 /* The live switch. Only meaningful when more than one provider stands
- * (`both` / `all`); takes effect on the next cycle, and the in-flight
+ * (`all`); takes effect on the next cycle, and the in-flight
  * one is finished on the old provider rather than abandoned. */
 void hand_tracker_set_ep(struct hand_tracker* h, enum infer_ep ep);
 enum infer_ep hand_tracker_ep(const struct hand_tracker* h);

@@ -257,8 +257,18 @@ endif()
 #    An ORT that ships its own libwebgpu_dawn.so is refused: two Dawns in
 #    one process cannot share a device.
 # ---------------------------------------------------------------------------
-set(ORT_ROOT "$ENV{HOME}/opt/onnxruntime-webgpu-extdawn" CACHE PATH
-    "onnxruntime install built with the in-tree WebGPU EP and USE_EXTERNAL_DAWN")
+# Default to the CUDA-enabled install when build-deps.sh has produced one
+# (it is a superset: WebGPU EP + external Dawn + the CUDA provider), else
+# the plain WebGPU install. Only the first configure sees this default --
+# an existing cache keeps its ORT_ROOT (override with -DORT_ROOT= or -UORT_ROOT).
+if(EXISTS "$ENV{HOME}/opt/onnxruntime-webgpu-cuda/lib/libonnxruntime.so"
+   OR EXISTS "$ENV{HOME}/opt/onnxruntime-webgpu-cuda/lib64/libonnxruntime.so")
+    set(ORT_ROOT_DEFAULT "$ENV{HOME}/opt/onnxruntime-webgpu-cuda")
+else()
+    set(ORT_ROOT_DEFAULT "$ENV{HOME}/opt/onnxruntime-webgpu-extdawn")
+endif()
+set(ORT_ROOT "${ORT_ROOT_DEFAULT}" CACHE PATH
+    "onnxruntime install built with the in-tree WebGPU EP and USE_EXTERNAL_DAWN (and --use_cuda)")
 set(DAWN_ROOT "$ENV{HOME}/opt/dawn" CACHE PATH
     "standalone Dawn install (monolithic shared libwebgpu_dawn.so)")
 # The CUDA EP is a separate libonnxruntime_providers_cuda.so that
@@ -266,7 +276,8 @@ set(DAWN_ROOT "$ENV{HOME}/opt/dawn" CACHE PATH
 # curand and dlopens libcudnn.so.9 by name. It exists only when ORT was
 # built with --use_cuda -- build-deps.sh does that by itself whenever it
 # finds a toolkit, into its own prefix ~/opt/onnxruntime-webgpu-cuda
-# (point ORT_ROOT there; the plain WebGPU install stays untouched).
+# (ORT_ROOT defaults there once it exists; the plain WebGPU install
+# stays untouched).
 # CUDNN_ROOT holds the cuDNN 9 runtime, placed there by build-deps.sh's
 # `cudnn` step; the toolkit itself is found through CMake's CUDAToolkit
 # (nvcc on PATH, or -DCUDAToolkit_ROOT=).
@@ -441,11 +452,11 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
     # EP disagreement downstream is the model's and not the input's
     add_test(NAME hand_frame_agree
              COMMAND hello_hand ${HAND_FRAME} --compare-frame-to-tensor --strict)
-    # the acceptance test: both providers must find the same hand
-    add_test(NAME hand_both
+    # the acceptance test: every provider must find the same hand
+    add_test(NAME hand_all
              COMMAND hello_hand ${HAND_FRAME} ${HAND_MODELS}
-                     --both --iters 2 --warmup 3 --strict)
-    set_tests_properties(hand_frame_agree hand_both PROPERTIES LABELS gpu)
+                     --all --iters 2 --warmup 3 --strict)
+    set_tests_properties(hand_frame_agree hand_all PROPERTIES LABELS gpu)
 
     if(INFER_HAVE_CUDA)
         # warmup 3 wherever the CUDA EP runs captured: capture lands on the

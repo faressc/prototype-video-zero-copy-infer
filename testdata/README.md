@@ -17,7 +17,7 @@ fixture is a real camera frame rather than something staged.
 
 It exists so the stage-five tests are **reproducible**. A live camera shows
 something different every run, which is fine for a demo and useless for a
-test: `hand_cpu`, `hand_frame_agree` and `hand_both` all need the same bytes
+test: `hand_cpu`, `hand_frame_agree` and `hand_all` all need the same bytes
 every time to mean anything.
 
 **It does not contain a hand the pipeline can reach**, and that is worth

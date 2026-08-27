@@ -64,7 +64,7 @@ enum { STAT_WINDOW = 32 };
 
 /* One provider's pair of sessions. Built once; graph capture pins the
  * tensors inside, so nothing here may be rebuilt on an EP switch --
- * which is exactly why `both` builds both up front. */
+ * which is exactly why `all` builds every provider up front. */
 struct provider {
     struct hand_model* palm;
     struct hand_model* lmk;
@@ -140,10 +140,10 @@ struct hand_tracker {
 
 static void options_usage(void) {
     fprintf(stderr,
-            "  --ep cpu|webgpu|cuda|both|all\n"
+            "  --ep cpu|webgpu|cuda|all\n"
             "                         which execution provider (HAND_EP sets the default);\n"
-            "                         `both` builds cpu + webgpu, `all` every provider that\n"
-            "                         comes up -- extras stand ready so P switches instantly\n"
+            "                         `all` builds every provider that comes up -- extras\n"
+            "                         stand ready so P switches instantly\n"
             "  --crop / --letterbox   how the frame reaches the 192x192 detector. Crop is the\n"
             "                         default: MediaPipe letterboxes, but on a 16:9 camera that\n"
             "                         spends 84 of 192 rows on bars (score 0.26 vs 0.76 here)\n"
@@ -222,12 +222,10 @@ int hand_options_parse(int argc, char** argv, struct hand_options* o) {
     o->lmk_model = "models/hand_landmark_full.onnx";
     const char* env = getenv("HAND_EP");
     if (env) {
-        if (!strcmp(env, "both")) {
-            o->both = 1;
-        } else if (!strcmp(env, "all")) {
+        if (!strcmp(env, "all")) {
             o->all = 1;
         } else if (infer_ep_parse(env, &o->ep) < 0) {
-            fprintf(stderr, "HAND_EP must be cpu, webgpu, cuda, both or all\n");
+            fprintf(stderr, "HAND_EP must be cpu, webgpu, cuda or all\n");
             return -1;
         }
     }
@@ -235,10 +233,7 @@ int hand_options_parse(int argc, char** argv, struct hand_options* o) {
         const char* s = argv[i];
         const char* v = i + 1 < argc ? argv[i + 1] : NULL;
         if (!strcmp(s, "--ep") && v) {
-            if (!strcmp(v, "both")) {
-                o->both = 1;
-                o->ep = INFER_EP_CPU;
-            } else if (!strcmp(v, "all")) {
+            if (!strcmp(v, "all")) {
                 o->all = 1;
                 o->ep = INFER_EP_CPU;
             } else if (infer_ep_parse(v, &o->ep) < 0) {
@@ -787,7 +782,6 @@ struct hand_tracker* hand_tracker_create(const struct hand_options* o,
      * touched -- only the wanted EPs' own domains come up. */
     int need[INFER_EP_COUNT] = {0};
     need[o->ep] = 1;
-    if (o->both) { need[INFER_EP_CPU] = need[INFER_EP_WEBGPU] = 1; }
     if (o->all) {
         for (int e = 0; e < INFER_EP_COUNT; e++) { need[e] = 1; }
     }

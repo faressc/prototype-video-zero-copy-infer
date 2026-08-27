@@ -411,8 +411,8 @@ int infer_tensor_readback(struct infer_ctx* c, const struct infer_tensor* t, flo
 }
 
 void infer_tensor_release(struct infer_ctx* c, struct infer_tensor* t) {
-    if (t->priv && t->priv_free) { t->priv_free(t->priv); }
-    t->priv = NULL;
+    /* the domain release first: infer_vk_release reads t->priv (the
+     * descriptor set lives there), so priv is freed after, not before */
     switch (t->domain) {
     case INFER_DOMAIN_CPU:
         if (t->owned) { free(t->mem.cpu.ptr); }
@@ -424,6 +424,8 @@ void infer_tensor_release(struct infer_ctx* c, struct infer_tensor* t) {
     case INFER_DOMAIN_CUDA: infer_cuda_release(&c->cuda, t); break;
     default: break;
     }
+    if (t->priv && t->priv_free) { t->priv_free(t->priv); }
+    t->priv = NULL;
     infer_sync_reset(&t->ready);
     infer_sync_reset(&t->released);
     memset(t, 0, sizeof *t);
