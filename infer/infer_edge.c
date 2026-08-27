@@ -17,10 +17,21 @@
  *
  * Imports are cached in the caller's infer_edge_cache, keyed by the
  * tensor whose memory was imported -- never on the tensors themselves.
+ *
+ * The CUDA rows are HOST_COPY throughout except the identity: CUDA has
+ * no dma-buf or sync-file handle type, so until a Vulkan opaque-fd
+ * export or an EGL interop path exists (README §20, phase B) a tensor
+ * crosses between CUDA and the dma-buf domains through a host staging
+ * buffer -- the existing readback into it, then cudaMemcpyAsync, or the
+ * reverse. The staging buffer is cached keyed by the CUDA-side tensor,
+ * which is never an import key, so it cannot collide with the dma-buf
+ * imports above in the same cache.
  */
 #include "infer.h"
 
+#include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "infer_util.h"
@@ -159,7 +170,8 @@ static int wgpu_write_buffer(struct infer_ctx* c,
     return 0;
 }
 
-/* GL / VK / WGPU -> CPU */
+/* GL / VK / WGPU / CUDA -> CPU (the domain's readback waits for its own
+ * completion token, so the host tensor is complete on return) */
 static int readback_to_cpu(struct infer_ctx* c,
                            struct infer_edge_cache* k,
                            struct infer_tensor* src,
@@ -254,12 +266,189 @@ static int cpu_to_gl(struct infer_ctx* c,
     return infer_gl_upload(&c->gl, src->mem.cpu.ptr, dst);
 }
 
+/* CPU -> CUDA: the H2D copy on the shared stream, ordered ahead of the
+ * EP's kernels; the source may be reused at once (pageable staging) */
+static int cuda_memcpy_h2d(struct infer_ctx* c,
+                           struct infer_edge_cache* k,
+                           struct infer_tensor* src,
+                           struct infer_tensor* dst) {
+    (void)k;
+    if (ensure(c, INFER_DOMAIN_CUDA, dst, &src->desc) < 0) { return -1; }
+    return infer_cuda_upload(&c->cuda, src->mem.cpu.ptr, dst);
+}
+
+/* the host floats a CUDA tensor is staged through on its way to or from
+ * a dma-buf domain; one per CUDA tensor, kept in the caller's cache */
+static float* staging_of(struct infer_edge_cache* k, const struct infer_tensor* cuda_t, size_t bytes) {
+    float* s = infer_edge_cache_get(k, cuda_t);
+    if (s) { return s; }
+    s = malloc(bytes);
+    if (!s) { return NULL; }
+    if (infer_edge_cache_put(k, cuda_t, s, free) < 0) {
+        free(s);
+        return NULL;
+    }
+    return s;
+}
+
+/* GL / VK / WGPU / DMABUF -> CUDA: the domain's own readback (which waits
+ * on the producer's fence) into the staging buffer, then H2D */
+static int via_host_to_cuda(struct infer_ctx* c,
+                            struct infer_edge_cache* k,
+                            struct infer_tensor* src,
+                            struct infer_tensor* dst) {
+    if (ensure(c, INFER_DOMAIN_CUDA, dst, &src->desc) < 0) { return -1; }
+    float* s = staging_of(k, dst, infer_desc_bytes_packed(&src->desc));
+    INFER_CHECK(s, "via_host: out of memory");
+    if (infer_tensor_readback(c, src, s) < 0) { return -1; }
+    return infer_cuda_upload(&c->cuda, s, dst);
+}
+
+/* CUDA -> GL / VK / WGPU / DMABUF: D2H into the staging buffer (waits for
+ * the stream, so the EP's outputs are complete), then the same host
+ * upload the cpu -> X rows use. The consumer allocated dst. For a
+ * dma-buf the write window is opened here and LEFT OPEN: closing it --
+ * the clflush and DMA_BUF_SYNC_END -- is what infer_tensor_wait_ready
+ * does for a dma-buf with no fence, exactly as after the CPU EP's mmap
+ * hand-over, so no fence is set and the bracket balances. */
+static int via_host_from_cuda(struct infer_ctx* c,
+                              struct infer_edge_cache* k,
+                              struct infer_tensor* src,
+                              struct infer_tensor* dst) {
+    const size_t bytes = infer_desc_bytes_packed(&src->desc);
+    float* s = staging_of(k, src, bytes);
+    INFER_CHECK(s, "via_host: out of memory");
+    if (infer_cuda_readback(&c->cuda, src, s) < 0) { return -1; }
+    switch (dst->domain) {
+    case INFER_DOMAIN_GL:
+        INFER_CHECK(dst->mem.gl.bo, "via_host: the consumer's gl tensor is not allocated");
+        return infer_gl_upload(&c->gl, s, dst);
+    case INFER_DOMAIN_VK:
+        INFER_CHECK(dst->mem.vk.memory, "via_host: the consumer's vk tensor is not allocated");
+        return infer_vk_upload(&c->vk, s, dst);
+    case INFER_DOMAIN_WGPU:
+        if (ensure(c, INFER_DOMAIN_WGPU, dst, &src->desc) < 0) { return -1; }
+        wgpuQueueWriteBuffer(c->wgpu.queue, dst->mem.wgpu.buffer, 0, s, bytes);
+        return 0;
+    case INFER_DOMAIN_DMABUF:
+        INFER_CHECK(dst->mem.dmabuf.map, "via_host: the consumer's dmabuf tensor is not allocated");
+        /* the previous consumer of these pages may still be reading */
+        if (dst->released.sync_fd >= 0) {
+            struct pollfd p = {.fd = dst->released.sync_fd, .events = POLLIN};
+            while (poll(&p, 1, -1) < 0) {}
+            infer_sync_reset(&dst->released);
+        }
+        if (infer_dmabuf_sync(dst, 1, 1) < 0) { return -1; }
+        memcpy(dst->mem.dmabuf.map, s, bytes);
+        infer_sync_reset(&dst->ready); /* CPU-written: wait_ready closes the window */
+        return 0;
+    default: INFER_CHECK(0, "via_host: no route into %s", infer_domain_name(dst->domain));
+    }
+    return -1;
+}
+
+/* WGPU <-> CUDA without host memory: neither side can touch the other
+ * directly (Dawn's Vulkan backend imports only dma-buf textures and
+ * exports nothing; CUDA imports only OPAQUE_FD, and on NVIDIA one
+ * allocation cannot export both ways), so the bridge is a cached pair
+ * of intermediates keyed by the CUDA tensor: a VK-exported dma-buf
+ * tensor that Dawn relayouts into or out of (the existing dmabuf_write /
+ * dmabuf_import bodies), and the opaque-fd buffer whose mapping the
+ * stream D2Ds against, joined by one VK copy. Three device hops, zero
+ * host bytes -- DEVICE_COPY, the honest class. On a driver whose
+ * allocations can be dma-buf AND opaque-fd at once this collapses to
+ * one hop; probe that before optimising. */
+struct wgpu_cuda_state {
+    struct infer_ctx* c; /* outlives the cache (run_cell/hand_model order) */
+    struct infer_tensor stage;
+    struct infer_vk_cuda_buf* buf;
+};
+
+static void wgpu_cuda_state_free(void* p) {
+    struct wgpu_cuda_state* s = p;
+    if (!s) { return; }
+    infer_vk_cuda_buf_destroy(s->buf);
+    infer_tensor_release(s->c, &s->stage);
+    free(s);
+}
+
+static struct wgpu_cuda_state* wgpu_cuda_state_of(struct infer_ctx* c,
+                                                  struct infer_edge_cache* k,
+                                                  const struct infer_tensor* cuda_t,
+                                                  const struct infer_desc* d,
+                                                  int dawn_writes) {
+    struct wgpu_cuda_state* s = infer_edge_cache_get(k, cuda_t);
+    if (s) { return s; }
+    s = calloc(1, sizeof *s);
+    if (!s) { return NULL; }
+    s->c = c;
+    s->stage.ready.sync_fd = -1;
+    s->stage.released.sync_fd = -1;
+    if (infer_tensor_alloc(c, INFER_DOMAIN_VK, d, &s->stage) < 0) { goto fail; }
+    s->buf = infer_vk_cuda_buf_create(
+        c, (size_t)s->stage.desc.row_pitch_bytes * s->stage.desc.img_h);
+    if (!s->buf) { goto fail; }
+    /* the Dawn import of the staging tensor, created (and cached, keyed
+     * by the stage) BEFORE this state is put: cache teardown runs in
+     * insertion order, so Dawn's side goes down before the memory it
+     * imported is freed */
+    if (!import_of(c, k, &s->stage, dawn_writes)) { goto fail; }
+    if (infer_edge_cache_put(k, cuda_t, s, wgpu_cuda_state_free) < 0) { goto fail; }
+    return s;
+fail:
+    wgpu_cuda_state_free(s);
+    return NULL;
+}
+
+/* WGPU -> CUDA: Dawn relayouts the source buffer into the staging
+ * tensor, the VK copy moves it into the shared buffer (waiting Dawn's
+ * fence host-side, signalling the buffer's semaphore), and the stream
+ * waits that semaphore and D2Ds into the engine's tensor. */
+static int wgpu_cuda_in(struct infer_ctx* c,
+                        struct infer_edge_cache* k,
+                        struct infer_tensor* src,
+                        struct infer_tensor* dst) {
+    if (ensure(c, INFER_DOMAIN_CUDA, dst, &src->desc) < 0) { return -1; }
+    struct wgpu_cuda_state* s = wgpu_cuda_state_of(c, k, dst, &src->desc, 1);
+    INFER_CHECK(s, "wgpu->cuda: no bridge state");
+    if (wgpu_to_dmabuf(c, k, src, &s->stage) < 0) { return -1; } /* stage.ready = Dawn's fence */
+    if (infer_vk_cuda_buf_from_tensor(c, s->buf, &s->stage) < 0) { return -1; }
+    if (infer_vk_cuda_buf_stream_wait(c, s->buf) < 0) { return -1; }
+    if (infer_vk_cuda_buf_read_into(c, s->buf, &s->stage.desc, dst) < 0) { return -1; }
+    infer_sync_reset(&dst->ready); /* the stream is the token */
+    return 0;
+}
+
+/* CUDA -> WGPU, called as convert(src = the engine's cuda tensor,
+ * dst = the consumer's wgpu tensor): the stream D2Ds into the shared
+ * buffer and signals; the VK copy waits on the device, fills the staging
+ * tensor and exports its completion; Dawn's relayout waits that fence
+ * and writes the consumer's buffer -- same-queue ordering is then the
+ * consumer's token, as for every wgpu destination. */
+static int wgpu_cuda_out(struct infer_ctx* c,
+                         struct infer_edge_cache* k,
+                         struct infer_tensor* src,
+                         struct infer_tensor* dst) {
+    if (ensure(c, INFER_DOMAIN_WGPU, dst, &src->desc) < 0) { return -1; }
+    struct wgpu_cuda_state* s = wgpu_cuda_state_of(c, k, src, &src->desc, 0);
+    INFER_CHECK(s, "cuda->wgpu: no bridge state");
+    if (infer_vk_cuda_buf_write_from(c, s->buf, &s->stage.desc, src) < 0) { return -1; }
+    if (infer_vk_cuda_buf_stream_signal(c, s->buf) < 0) { return -1; }
+    int fd = -1;
+    if (infer_vk_cuda_buf_to_tensor(c, s->buf, &s->stage, &fd) < 0) { return -1; }
+    infer_sync_set(&s->stage.ready, fd); /* gates Dawn's access below */
+    return dmabuf_to_wgpu(c, k, &s->stage, dst);
+}
+
 /* ------------------------------------------------------------------ */
 /* probes                                                             */
 /* ------------------------------------------------------------------ */
 
 static int probe_wgpu(struct infer_ctx* c) {
     return (c->have & INFER_WANT_WGPU) != 0;
+}
+static int probe_cuda(struct infer_ctx* c) {
+    return (c->have & INFER_WANT_CUDA) != 0;
 }
 static int probe_gl(struct infer_ctx* c) {
     return (c->have & INFER_WANT_GL) != 0;
@@ -279,6 +468,26 @@ static int probe_dmabuf(struct infer_ctx* c) {
 }
 static int probe_dmabuf_wgpu(struct infer_ctx* c) {
     return probe_dmabuf(c) && probe_wgpu(c) && c->wgpu.has_dmabuf;
+}
+static int probe_gl_cuda(struct infer_ctx* c) {
+    return probe_gl(c) && probe_cuda(c);
+}
+static int probe_vk_cuda(struct infer_ctx* c) {
+    return probe_vk(c) && probe_cuda(c);
+}
+static int probe_vk_cuda_fd(struct infer_ctx* c) {
+    return probe_vk(c) && probe_cuda(c) && infer_vk_cuda_available(c);
+}
+static int probe_wgpu_cuda_fd(struct infer_ctx* c) {
+    /* Dawn must import the staging dma-buf, and the VK tensor that backs
+     * it must exist, and the opaque-fd crossing must work */
+    return probe_vk_wgpu(c) && probe_cuda(c) && infer_vk_cuda_available(c);
+}
+static int probe_wgpu_cuda(struct infer_ctx* c) {
+    return probe_wgpu(c) && probe_cuda(c);
+}
+static int probe_dmabuf_cuda(struct infer_ctx* c) {
+    return probe_dmabuf(c) && probe_cuda(c);
 }
 
 /* ------------------------------------------------------------------ */
@@ -311,6 +520,27 @@ void infer_registry_init(struct infer_registry* r) {
         ROW(CPU, GL, "upload", HOST_COPY, 0, probe_gl, cpu_to_gl),
         ROW(CPU, VK, "upload", HOST_COPY, 0, probe_vk, cpu_to_vk),
         ROW(CPU, DMABUF, "mmap", ZERO_COPY, 1, probe_dmabuf, dmabuf_map_write),
+        /* the CUDA domain: the identity hand-over, the two host copies,
+         * the opaque-fd bridge to Vulkan (infer_vk_cuda.c -- one GPU copy
+         * each way, no host memory), and the staged routes for everything
+         * else (CUDA imports no dma-buf; find() takes the first AVAILABLE
+         * row per key, so via_host is the fallback when the bridge's
+         * probe says no) */
+        ROW(CUDA, CUDA, "identity", ZERO_COPY, 1, probe_cuda, identity),
+        ROW(CPU, CUDA, "memcpy_h2d", HOST_COPY, 0, probe_cuda, cuda_memcpy_h2d),
+        ROW(CUDA, CPU, "memcpy_d2h", HOST_COPY, 0, probe_cuda, readback_to_cpu),
+        ROW(VK, CUDA, "opaque_fd", DEVICE_COPY, 0, probe_vk_cuda_fd, infer_vk_cuda_to_cuda),
+        ROW(VK, CUDA, "via_host", HOST_COPY, 0, probe_vk_cuda, via_host_to_cuda),
+        ROW(CUDA, VK, "opaque_fd", DEVICE_COPY, 0, probe_vk_cuda_fd, infer_vk_cuda_from_cuda),
+        ROW(CUDA, VK, "via_host", HOST_COPY, 0, probe_vk_cuda, via_host_from_cuda),
+        ROW(WGPU, CUDA, "dmabuf_bridge", DEVICE_COPY, 0, probe_wgpu_cuda_fd, wgpu_cuda_in),
+        ROW(WGPU, CUDA, "via_host", HOST_COPY, 0, probe_wgpu_cuda, via_host_to_cuda),
+        ROW(CUDA, WGPU, "dmabuf_bridge", DEVICE_COPY, 0, probe_wgpu_cuda_fd, wgpu_cuda_out),
+        ROW(CUDA, WGPU, "via_host", HOST_COPY, 0, probe_wgpu_cuda, via_host_from_cuda),
+        ROW(GL, CUDA, "via_host", HOST_COPY, 0, probe_gl_cuda, via_host_to_cuda),
+        ROW(DMABUF, CUDA, "via_host", HOST_COPY, 0, probe_dmabuf_cuda, via_host_to_cuda),
+        ROW(CUDA, GL, "via_host", HOST_COPY, 0, probe_gl_cuda, via_host_from_cuda),
+        ROW(CUDA, DMABUF, "via_host", HOST_COPY, 0, probe_dmabuf_cuda, via_host_from_cuda),
     };
     memset(r, 0, sizeof *r);
     r->count = (int)(sizeof table / sizeof table[0]);
@@ -327,10 +557,17 @@ void infer_registry_probe(struct infer_registry* r, struct infer_ctx* c) {
 const struct infer_edge* infer_registry_find(const struct infer_registry* r,
                                              enum infer_domain src,
                                              enum infer_domain dst) {
+    /* a key may have layered rows (opaque_fd above via_host): the first
+     * AVAILABLE one wins; with none available the first row is returned
+     * so the caller can report what is missing */
+    const struct infer_edge* fallback = NULL;
     for (int i = 0; i < r->count; i++) {
-        if (r->edges[i].src == src && r->edges[i].dst == dst) { return &r->edges[i]; }
+        if (r->edges[i].src == src && r->edges[i].dst == dst) {
+            if (r->edges[i].available) { return &r->edges[i]; }
+            if (!fallback) { fallback = &r->edges[i]; }
+        }
     }
-    return NULL;
+    return fallback;
 }
 
 int infer_edge_apply(const struct infer_edge* e,

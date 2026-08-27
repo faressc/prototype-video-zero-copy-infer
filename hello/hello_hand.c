@@ -311,13 +311,78 @@ static void write_ppm(const char* path,
     fprintf(stderr, "wrote %s (%ux%u)\n", path, w, h);
 }
 
+/* The WebGPU EP's input on a driver that refuses Dawn's frame import:
+ * the Vulkan pass writes a VK tensor, the registry's vk -> wgpu row
+ * moves it into a WGPU tensor (hand_model_use_vk_feed's route, replayed
+ * here without a model), and what comes back is held to the same bar as
+ * the direct import -- the edge is part of the input now, so it is part
+ * of the check. Two rounds (the first pays the import and the pipeline),
+ * the second timed; `out` receives the WGPU tensor's floats. */
+static int frame_to_tensor_via_vk_feed(struct infer_ctx* ctx,
+                                       const struct frame_source* s,
+                                       const struct options* o,
+                                       const struct infer_desc* d,
+                                       struct hand_affine a,
+                                       float* out,
+                                       double* us) {
+    struct infer_registry reg;
+    infer_registry_init(&reg);
+    infer_registry_probe(&reg, ctx);
+    const struct infer_edge* e = infer_registry_find(&reg, INFER_DOMAIN_VK, INFER_DOMAIN_WGPU);
+    INFER_CHECK(e && e->available, "no vk -> wgpu edge on this machine");
+    struct infer_tensor t_v, t_g;
+    memset(&t_v, 0, sizeof t_v);
+    memset(&t_g, 0, sizeof t_g);
+    t_v.ready.sync_fd = t_v.released.sync_fd = -1;
+    t_g.ready.sync_fd = t_g.released.sync_fd = -1;
+    const int tensors_ok = infer_tensor_alloc(ctx, INFER_DOMAIN_VK, d, &t_v) == 0 &&
+                           t_v.mem.vk.buffer && infer_tensor_alloc(ctx, INFER_DOMAIN_WGPU, d, &t_g) == 0;
+    struct infer_frame idesc = hand_frame_import_desc(&s->frame);
+    struct infer_vk_frame_import* vim = infer_vk_frame_import_create(&ctx->vk, &idesc);
+    struct hand_frame_pass_vk* vp = vim ? hand_frame_pass_vk_create(&ctx->vk) : NULL;
+    struct infer_edge_cache cache;
+    infer_edge_cache_init(&cache);
+    int rc = -1;
+    if (!vim) {
+        fprintf(stderr, "vk frame import refused\n");
+    } else if (vp && tensors_ok) {
+        rc = 0;
+        for (int it = 0; it < 2 && rc == 0; it++) {
+            uint64_t t0 = infer_now_ns();
+            if (hand_frame_to_tensor_vk_tensor(&ctx->vk, vp, vim, &s->frame, a, o->norm,
+                                               HAND_BORDER_ZERO, &t_v, NULL) < 0 ||
+                infer_edge_apply(e, ctx, &cache, &t_v, &t_g) < 0 ||
+                infer_tensor_wait_ready(ctx, &t_g) < 0) {
+                rc = -1;
+            }
+            *us = (double)(infer_now_ns() - t0) / 1e3;
+        }
+        if (rc == 0 && infer_tensor_readback(ctx, &t_g, out) < 0) { rc = -1; }
+    } else {
+        fprintf(stderr, "vk feed: pass/tensor creation failed\n");
+    }
+    hand_frame_vk_wait(&ctx->vk, vp);
+    infer_edge_cache_fini(&cache); /* Dawn's import of t_v holds its fd */
+    infer_tensor_release(ctx, &t_g);
+    infer_tensor_release(ctx, &t_v);
+    hand_frame_pass_vk_destroy(&ctx->vk, vp);
+    infer_vk_frame_import_destroy(vim);
+    return rc;
+}
+
 /* Both FrameToTensor paths on one frame, then the difference. This is
  * the check that makes every later "the two EPs disagree" question
  * answerable: if the inputs match, the disagreement is the model's. */
 static int stage_frame(struct frame_source* s, const struct options* o) {
     struct infer_ctx ctx;
     const int want_gpu = o->ep == INFER_EP_WEBGPU || o->compare || o->probe;
-    infer_ctx_init_all(&ctx, want_gpu ? INFER_WANT_WGPU : 0u);
+    unsigned want = want_gpu ? INFER_WANT_WGPU : 0u;
+    /* the Vulkan pass (the CUDA EP's feed) is held to the same bar, and
+     * it is also what says whether Dawn's import may be attempted at all
+     * (and what feeds the WebGPU EP when not); its domain is best-effort
+     * -- absent, the section reports and moves on */
+    if (want_gpu) { want |= INFER_WANT_VK; }
+    infer_ctx_init_all(&ctx, want);
     if (want_gpu && !(ctx.have & INFER_WANT_WGPU)) {
         fprintf(stderr, "no WebGPU domain: cannot run the GPU frame pass\n");
         return 1;
@@ -354,52 +419,163 @@ static int stage_frame(struct frame_source* s, const struct options* o) {
         fprintf(stderr, "frame -> tensor, cpu:    %7.1f us\n", us);
     }
 
+    /* the Vulkan pass, before the Dawn one: on a driver whose NV12
+     * import Dawn cannot take, this is still comparable */
+    if ((o->compare || o->probe) && (ctx.have & INFER_WANT_VK) && cpu) {
+        struct infer_frame idesc = hand_frame_import_desc(&s->frame);
+        struct infer_vk_frame_import* vim = infer_vk_frame_import_create(&ctx.vk, &idesc);
+        if (!vim) {
+            fprintf(stderr, "vk frame import: REFUSED -- the CUDA EP must be fed from the host\n");
+        } else {
+            struct hand_frame_pass_vk* vp = hand_frame_pass_vk_create(&ctx.vk);
+            struct infer_tensor t_v;
+            memset(&t_v, 0, sizeof t_v);
+            t_v.ready.sync_fd = t_v.released.sync_fd = -1;
+            float* vkq = NULL;
+            if (!vp || infer_tensor_alloc(&ctx, INFER_DOMAIN_VK, &d, &t_v) < 0) {
+                fprintf(stderr, "vk pass/tensor creation failed\n");
+                bad = 1;
+            } else if (!t_v.mem.vk.buffer) {
+                fprintf(stderr, "vk tensor has no buffer alias; vk pass not comparable here\n");
+            } else {
+                int vbad = 0;
+                double us = 0;
+                /* warm up once (pipeline, first acquire), then time */
+                for (int it = 0; it < 2 && !vbad; it++) {
+                    uint64_t t0 = infer_now_ns();
+                    if (hand_frame_to_tensor_vk(&ctx.vk, vp, vim, &s->frame, a, o->norm,
+                                                HAND_BORDER_ZERO, o->tensor, o->tensor,
+                                                t_v.mem.vk.buffer, infer_desc_bytes_packed(&d),
+                                                VK_NULL_HANDLE, NULL) < 0 ||
+                        hand_frame_vk_wait(&ctx.vk, vp) < 0) {
+                        vbad = 1;
+                    }
+                    us = (double)(infer_now_ns() - t0) / 1e3;
+                }
+                if (!vbad) {
+                    vkq = malloc(n * sizeof(float));
+                    if (infer_tensor_readback(&ctx, &t_v, vkq) < 0) { vbad = 1; }
+                }
+                if (vbad) {
+                    bad = 1;
+                } else {
+                    fprintf(stderr, "frame -> tensor, vk:     %7.1f us (submit + wait)\n", us);
+                    double err = 0;
+                    size_t worst = 0;
+                    for (size_t i = 0; i < n; i++) {
+                        double e = fabs((double)cpu[i] - (double)vkq[i]);
+                        if (e > err) {
+                            err = e;
+                            worst = i;
+                        }
+                    }
+                    const double tol = 1.0 / 255.0;
+                    fprintf(stderr,
+                            "cpu vs vk tensor:        max |d| %.3g at element %zu (cpu %.5f, vk %.5f) -- %s\n",
+                            err, worst, (double)cpu[worst], (double)vkq[worst],
+                            err <= tol ? "ok" : "MISMATCH");
+                    if (o->verbose) {
+                        /* which failure is it: all-zero planes, one bad
+                         * plane, or a resampling disagreement */
+                        size_t nbad = 0;
+                        float vmin = vkq[0], vmax = vkq[0];
+                        for (size_t i = 0; i < n; i++) {
+                            if (fabs((double)cpu[i] - (double)vkq[i]) > tol) { nbad++; }
+                            if (vkq[i] < vmin) { vmin = vkq[i]; }
+                            if (vkq[i] > vmax) { vmax = vkq[i]; }
+                        }
+                        const size_t mid = n / 2 - (n / 2) % 3;
+                        fprintf(stderr,
+                                "  vk: %zu/%zu off; vk range [%g, %g]\n"
+                                "  el 0..2  vk (%.3f %.3f %.3f) cpu (%.3f %.3f %.3f)\n"
+                                "  mid      vk (%.3f %.3f %.3f) cpu (%.3f %.3f %.3f)\n",
+                                nbad, n, (double)vmin, (double)vmax, (double)vkq[0],
+                                (double)vkq[1], (double)vkq[2], (double)cpu[0], (double)cpu[1],
+                                (double)cpu[2], (double)vkq[mid], (double)vkq[mid + 1],
+                                (double)vkq[mid + 2], (double)cpu[mid], (double)cpu[mid + 1],
+                                (double)cpu[mid + 2]);
+                    }
+                    if (err > tol) { bad = 1; }
+                }
+            }
+            free(vkq);
+            infer_tensor_release(&ctx, &t_v);
+            hand_frame_pass_vk_destroy(&ctx.vk, vp);
+            infer_vk_frame_import_destroy(vim);
+        }
+    }
+
     if (want_gpu) {
         struct infer_frame idesc = hand_frame_import_desc(&s->frame);
-        struct infer_wgpu_frame_import* im = infer_wgpu_frame_import_create(&ctx.wgpu, &idesc);
-        if (!im) {
-            /* not a bug in us: this driver will not let a shader read the
-             * camera's frame, so the WebGPU EP has to be fed from the host
-             * (the cpu -> wgpu write_buffer row). Reported, not hidden. */
-            fprintf(stderr, "frame import: REFUSED -- the WebGPU EP must be fed from the host\n");
-            bad = 1;
-            goto out;
-        }
-        fprintf(stderr, "frame import:            plane views, sampled in place\n");
-        struct hand_frame_pass* pass = hand_frame_pass_create(&ctx.wgpu);
-        struct infer_tensor t_gpu;
-        memset(&t_gpu, 0, sizeof t_gpu);
-        t_gpu.ready.sync_fd = t_gpu.released.sync_fd = -1;
-        if (!pass || infer_tensor_alloc(&ctx, INFER_DOMAIN_WGPU, &d, &t_gpu) < 0) {
-            fprintf(stderr, "gpu pass/tensor creation failed\n");
-            bad = 1;
-        } else {
+        /* Our Vulkan device is asked first whether Dawn's import may even
+         * be attempted: a driver that refuses it (NVIDIA 610.43, every
+         * linear NV12 layout) takes the process or the device down with
+         * it, so the question cannot be put to Dawn. Refused, the WebGPU
+         * EP's input comes through the vk pass and the vk -> wgpu row --
+         * and that is what gets compared, edge included. */
+        if (infer_vk_frame_multiplanar_importable(&ctx.vk, &idesc) == 0) {
+            fprintf(stderr,
+                    "frame import:            REFUSED by the driver (vk probe); the WebGPU EP is "
+                    "fed by the vk pass + the vk -> wgpu edge\n");
             gpu = malloc(n * sizeof(float));
-            /* warm up once (shader compile, first import access), then time */
             double us = 0;
-            for (int it = 0; it < 2; it++) {
-                int rel = -1;
-                uint64_t t0 = infer_now_ns();
-                if (infer_wgpu_frame_begin(&ctx.wgpu, im, -1) < 0 ||
-                    hand_frame_to_tensor_wgpu(&ctx.wgpu, pass, im, &s->frame, a, o->norm,
-                                              HAND_BORDER_ZERO, &t_gpu) < 0 ||
-                    infer_wgpu_frame_end(&ctx.wgpu, im, &rel) < 0) {
-                    bad = 1;
-                    break;
-                }
-                infer_wgpu_wait_idle(&ctx.wgpu);
-                us = (double)(infer_now_ns() - t0) / 1e3;
-                if (rel >= 0) { close(rel); }
-            }
-            if (!bad && infer_tensor_readback(&ctx, &t_gpu, gpu) < 0) {
-                fprintf(stderr, "gpu tensor readback failed\n");
+            if (frame_to_tensor_via_vk_feed(&ctx, s, o, &d, a, gpu, &us) < 0) {
                 bad = 1;
+            } else {
+                fprintf(stderr,
+                        "frame -> tensor, webgpu: %7.1f us (vk pass + dmabuf_import, submit + wait)\n",
+                        us);
             }
-            if (!bad) { fprintf(stderr, "frame -> tensor, webgpu: %7.1f us (submit + wait)\n", us); }
+        } else {
+            struct infer_wgpu_frame_import* im = infer_wgpu_frame_import_create(&ctx.wgpu, &idesc);
+            if (!im) {
+                /* not a bug in us: this driver will not let a shader read
+                 * the camera's frame, so the WebGPU EP has to be fed from
+                 * the host (the cpu -> wgpu write_buffer row). Reported,
+                 * not hidden. */
+                fprintf(stderr,
+                        "frame import: REFUSED -- the WebGPU EP must be fed from the host\n");
+                bad = 1;
+                goto out;
+            }
+            fprintf(stderr, "frame import:            plane views, sampled in place\n");
+            struct hand_frame_pass* pass = hand_frame_pass_create(&ctx.wgpu);
+            struct infer_tensor t_gpu;
+            memset(&t_gpu, 0, sizeof t_gpu);
+            t_gpu.ready.sync_fd = t_gpu.released.sync_fd = -1;
+            if (!pass || infer_tensor_alloc(&ctx, INFER_DOMAIN_WGPU, &d, &t_gpu) < 0) {
+                fprintf(stderr, "gpu pass/tensor creation failed\n");
+                bad = 1;
+            } else {
+                gpu = malloc(n * sizeof(float));
+                /* warm up once (shader compile, first import access), then time */
+                double us = 0;
+                for (int it = 0; it < 2; it++) {
+                    int rel = -1;
+                    uint64_t t0 = infer_now_ns();
+                    if (infer_wgpu_frame_begin(&ctx.wgpu, im, -1) < 0 ||
+                        hand_frame_to_tensor_wgpu(&ctx.wgpu, pass, im, &s->frame, a, o->norm,
+                                                  HAND_BORDER_ZERO, &t_gpu) < 0 ||
+                        infer_wgpu_frame_end(&ctx.wgpu, im, &rel) < 0) {
+                        bad = 1;
+                        break;
+                    }
+                    infer_wgpu_wait_idle(&ctx.wgpu);
+                    us = (double)(infer_now_ns() - t0) / 1e3;
+                    if (rel >= 0) { close(rel); }
+                }
+                if (!bad && infer_tensor_readback(&ctx, &t_gpu, gpu) < 0) {
+                    fprintf(stderr, "gpu tensor readback failed\n");
+                    bad = 1;
+                }
+                if (!bad) {
+                    fprintf(stderr, "frame -> tensor, webgpu: %7.1f us (submit + wait)\n", us);
+                }
+            }
+            infer_tensor_release(&ctx, &t_gpu);
+            hand_frame_pass_destroy(pass);
+            infer_wgpu_frame_import_destroy(im);
         }
-        infer_tensor_release(&ctx, &t_gpu);
-        hand_frame_pass_destroy(pass);
-        infer_wgpu_frame_import_destroy(im);
     }
 
     if (!bad && cpu && gpu) {
@@ -457,19 +633,22 @@ struct cycle_time {
  * identical, so the cycle body is written once. */
 static int feed(struct hand_model* m,
                 struct infer_wgpu_frame_import* im,
+                struct infer_vk_frame_import* vim,
                 const struct infer_frame* f,
                 struct hand_affine a) {
-    return hand_model_ep(m) == INFER_EP_WEBGPU ? hand_model_feed_wgpu(m, im, f, a)
-                                               : hand_model_feed_cpu(m, f, a);
+    if (hand_model_wants_vk_frame(m)) { return hand_model_feed_vk(m, vim, f, a); }
+    if (hand_model_ep(m) == INFER_EP_WEBGPU) { return hand_model_feed_wgpu(m, im, f, a); }
+    return hand_model_feed_cpu(m, f, a);
 }
 
 static int one_model(struct hand_model* m,
                      struct infer_wgpu_frame_import* im,
+                     struct infer_vk_frame_import* vim,
                      const struct infer_frame* f,
                      struct hand_affine a,
                      struct model_time* t) {
     uint64_t t0 = infer_now_ns();
-    if (feed(m, im, f, a) < 0) { return -1; }
+    if (feed(m, im, vim, f, a) < 0) { return -1; }
     uint64_t t1 = infer_now_ns();
     if (hand_model_run(m) < 0) { return -1; }
     uint64_t t2 = infer_now_ns();
@@ -514,10 +693,16 @@ struct pipeline_out {
 
 static int run_models(struct frame_source* s, const struct options* o, struct pipeline_out* res) {
     struct infer_ctx ctx;
-    const int gpu = o->ep == INFER_EP_WEBGPU;
-    infer_ctx_init_all(&ctx, gpu ? INFER_WANT_WGPU : 0u);
-    if (gpu && !(ctx.have & INFER_WANT_WGPU)) {
-        fprintf(stderr, "no WebGPU domain\n");
+    const int gpu = o->ep == INFER_EP_WEBGPU; /* the dma-buf frame-import path */
+    const enum infer_domain ep_dom = infer_engine_ort_input_domain(o->ep);
+    unsigned want = ep_dom == INFER_DOMAIN_CPU ? 0u : 1u << ep_dom;
+    /* the CUDA EP's frame pass runs on the Vulkan device, and the WebGPU
+     * EP wants it for the question that comes before Dawn's import (and
+     * as the feed when the answer is no); best effort either way */
+    if (o->ep == INFER_EP_CUDA || o->ep == INFER_EP_WEBGPU) { want |= INFER_WANT_VK; }
+    infer_ctx_init_all(&ctx, want);
+    if (ep_dom != INFER_DOMAIN_CPU && !(ctx.have & (1u << ep_dom))) {
+        fprintf(stderr, "no %s domain\n", infer_domain_name(ep_dom));
         return 1;
     }
     struct infer_registry reg;
@@ -528,6 +713,7 @@ static int run_models(struct frame_source* s, const struct options* o, struct pi
     struct hand_model* palm = NULL;
     struct hand_model* lmk = NULL;
     struct infer_wgpu_frame_import* im = NULL;
+    struct infer_vk_frame_import* vim = NULL;
     static float anchors[HAND_PALM_ANCHORS * 2];
     struct hand_det det[64];
     struct cycle_time* t = NULL;
@@ -552,9 +738,32 @@ static int run_models(struct frame_source* s, const struct options* o, struct pi
     }
     if (gpu) {
         struct infer_frame idesc = hand_frame_import_desc(&s->frame);
-        im = infer_wgpu_frame_import_create(&ctx.wgpu, &idesc);
-        if (!im) {
-            fprintf(stderr, "frame import refused: the WebGPU EP would need a host feed\n");
+        /* the tracker's decision (hand_tracker.c, choose_wgpu_route): our
+         * Vulkan device is asked first whether Dawn's import may even be
+         * attempted; refused, the vk pass feeds the WebGPU EP instead */
+        if (infer_vk_frame_multiplanar_importable(&ctx.vk, &idesc) == 0) {
+            if (hand_model_use_vk_feed(palm) < 0 || (lmk && hand_model_use_vk_feed(lmk) < 0)) {
+                fprintf(stderr, "frame import refused by the driver, and no vk feed: the WebGPU "
+                                "EP cannot be fed\n");
+                bad = 1;
+                goto out;
+            }
+        } else {
+            im = infer_wgpu_frame_import_create(&ctx.wgpu, &idesc);
+            if (!im) {
+                fprintf(stderr, "frame import refused: the WebGPU EP would need a host feed\n");
+                bad = 1;
+                goto out;
+            }
+        }
+    }
+    if (palm && hand_model_wants_vk_frame(palm)) {
+        struct infer_frame idesc = hand_frame_import_desc(&s->frame);
+        vim = infer_vk_frame_import_create(&ctx.vk, &idesc);
+        if (!vim) {
+            /* the model came up expecting the device feed; a frame the
+             * driver will not import is a real failure, not a fallback */
+            fprintf(stderr, "vk frame import refused\n");
             bad = 1;
             goto out;
         }
@@ -573,11 +782,11 @@ static int run_models(struct frame_source* s, const struct options* o, struct pi
         /* ONE access bracket per cycle: both FrameToTensor passes read the
          * same frame, so they share it. That is why infer_wgpu_frame_begin
          * and _end are separate calls (infer.h). */
-        if (gpu && infer_wgpu_frame_begin(&ctx.wgpu, im, -1) < 0) {
+        if (gpu && im && infer_wgpu_frame_begin(&ctx.wgpu, im, -1) < 0) {
             bad = 1;
             break;
         }
-        if (one_model(palm, im, &s->frame, fit, &t[it].palm) < 0) { bad = 1; }
+        if (one_model(palm, im, vim, &s->frame, fit, &t[it].palm) < 0) { bad = 1; }
 
         uint64_t d0 = infer_now_ns();
         int nkept = 0;
@@ -624,7 +833,7 @@ static int run_models(struct frame_source* s, const struct options* o, struct pi
                 }
                 infer_tensor_release(&ctx, &ct);
             }
-            if (one_model(lmk, im, &s->frame, crop, &t[it].lmk) < 0) {
+            if (one_model(lmk, im, vim, &s->frame, crop, &t[it].lmk) < 0) {
                 bad = 1;
             } else {
                 uint64_t d2 = infer_now_ns();
@@ -672,7 +881,7 @@ static int run_models(struct frame_source* s, const struct options* o, struct pi
                 t[it].decode += (double)(infer_now_ns() - d2) / 1e3;
             }
         }
-        if (gpu) {
+        if (gpu && im) {
             infer_wgpu_frame_end(&ctx.wgpu, im, &rel);
             if (rel >= 0) { close(rel); }
         }
@@ -813,6 +1022,7 @@ out:
     infer_wgpu_frame_import_destroy(im);
     hand_model_destroy(lmk);
     hand_model_destroy(palm);
+    infer_vk_frame_import_destroy(vim); /* after the models: their pass fences */
     infer_ctx_fini_all(&ctx);
     return bad;
 }
@@ -821,7 +1031,7 @@ out:
 
 static void usage(void) {
     fprintf(stderr,
-            "usage: hello_hand [--ep cpu|webgpu] [--stage frame|detect|landmark]\n"
+            "usage: hello_hand [--ep cpu|webgpu|cuda] [--stage frame|detect|landmark]\n"
             "                  [--self-test] [--probe] [--compare-frame-to-tensor]\n"
             "                  [--frame raw.nv12 --size WxH] [--size WxH] [--tensor N]\n"
             "                  [--crop] [--range 0|1] [--ppm out.ppm] [--iters N]\n"
@@ -956,30 +1166,46 @@ int main(int argc, char** argv) {
         if (o.stage == STAGE_FRAME) {
             bad += stage_frame(&src, &o);
         } else if (o.both) {
-            /* The acceptance test: the same frame through both providers
-             * must find the same hand. fp32 kernels in a different order
-             * on a different device will not agree bit for bit, but they
-             * must agree to far less than a pixel -- and if they disagree
-             * about WHETHER there is a hand, the threshold is sitting on a
-             * knife edge and that is worth saying out loud. */
-            struct options a = o, b = o;
+            /* The acceptance test: the same frame through the CPU
+             * provider and every GPU provider must find the same hand.
+             * fp32 kernels in a different order on a different device
+             * will not agree bit for bit, but they must agree to far
+             * less than a pixel -- and if they disagree about WHETHER
+             * there is a hand, the threshold is sitting on a knife edge
+             * and that is worth saying out loud. */
+            struct options a = o;
             a.ep = INFER_EP_CPU;
-            b.ep = INFER_EP_WEBGPU;
-            struct pipeline_out ra, rb;
+            struct pipeline_out ra;
             printf("---- cpu EP ----\n");
-            int fa = run_models(&src, &a, &ra);
-            printf("\n---- webgpu EP ----\n");
-            int fb = run_models(&src, &b, &rb);
-            bad += fa + fb;
-            printf("\n---- agreement ----\n");
-            if (fa || fb) {
-                printf("  one of the providers failed; nothing to compare\n");
-            } else if (ra.hands != rb.hands) {
-                printf("  DISAGREE on the hand count: cpu %d, webgpu %d\n", ra.hands, rb.hands);
-                bad++;
-            } else if (ra.hands == 0) {
-                printf("  both found no hand (nothing compared)\n");
-            } else {
+            const int fa = run_models(&src, &a, &ra);
+            bad += fa;
+            for (int e = 0; e < INFER_EP_COUNT; e++) {
+                if (e == INFER_EP_CPU) { continue; }
+                if (e == INFER_EP_CUDA && !infer_cuda_compiled()) {
+                    printf("\n---- cuda EP: built without CUDA, skipped ----\n");
+                    continue;
+                }
+                struct options b = o;
+                b.ep = (enum infer_ep)e;
+                struct pipeline_out rb;
+                printf("\n---- %s EP ----\n", infer_ep_name(b.ep));
+                const int fb = run_models(&src, &b, &rb);
+                bad += fb;
+                printf("\n---- agreement: cpu vs %s ----\n", infer_ep_name(b.ep));
+                if (fa || fb) {
+                    printf("  one of the providers failed; nothing to compare\n");
+                    continue;
+                }
+                if (ra.hands != rb.hands) {
+                    printf("  DISAGREE on the hand count: cpu %d, %s %d\n", ra.hands,
+                           infer_ep_name(b.ep), rb.hands);
+                    bad++;
+                    continue;
+                }
+                if (ra.hands == 0) {
+                    printf("  both found no hand (nothing compared)\n");
+                    continue;
+                }
                 double dbox = 0, dlm = 0;
                 for (int i = 0; i < ra.hands; i++) {
                     dbox = fmax(dbox, fabs((double)ra.det[i].cx - rb.det[i].cx));
@@ -994,13 +1220,15 @@ int main(int argc, char** argv) {
                 /* a pixel of the DETECTOR input is 3.3 frame pixels here,
                  * so a tenth of a detector pixel is a tight bar */
                 const double box_tol = 0.1, lm_tol = 1.0;
-                printf("  palm score   cpu %.4f  webgpu %.4f\n", ra.det[0].score, rb.det[0].score);
+                printf("  palm score   cpu %.4f  %s %.4f\n", ra.det[0].score, infer_ep_name(b.ep),
+                       rb.det[0].score);
                 printf("  box centre   max |d| %.4f detector px  (bar %.2f) -- %s\n", dbox, box_tol,
                        dbox <= box_tol ? "ok" : "MISMATCH");
                 if (ra.have_landmarks) {
                     printf("  landmarks    max |d| %.4f frame px     (bar %.2f) -- %s\n", dlm,
                            lm_tol, dlm <= lm_tol ? "ok" : "MISMATCH");
-                    printf("  presence     cpu %.4f  webgpu %.4f\n", ra.presence, rb.presence);
+                    printf("  presence     cpu %.4f  %s %.4f\n", ra.presence, infer_ep_name(b.ep),
+                           rb.presence);
                 }
                 if (dbox > box_tol || (ra.have_landmarks && dlm > lm_tol)) { bad++; }
             }

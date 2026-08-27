@@ -261,10 +261,21 @@ set(ORT_ROOT "$ENV{HOME}/opt/onnxruntime-webgpu-extdawn" CACHE PATH
     "onnxruntime install built with the in-tree WebGPU EP and USE_EXTERNAL_DAWN")
 set(DAWN_ROOT "$ENV{HOME}/opt/dawn" CACHE PATH
     "standalone Dawn install (monolithic shared libwebgpu_dawn.so)")
+# The CUDA EP is a separate libonnxruntime_providers_cuda.so that
+# libonnxruntime dlopens from its own directory; it links cudart/cublas/
+# curand and dlopens libcudnn.so.9 by name. It exists only when ORT was
+# built with --use_cuda -- build-deps.sh does that by itself whenever it
+# finds a toolkit, into its own prefix ~/opt/onnxruntime-webgpu-cuda
+# (point ORT_ROOT there; the plain WebGPU install stays untouched).
+# CUDNN_ROOT holds the cuDNN 9 runtime, placed there by build-deps.sh's
+# `cudnn` step; the toolkit itself is found through CMake's CUDAToolkit
+# (nvcc on PATH, or -DCUDAToolkit_ROOT=).
+set(CUDNN_ROOT "$ENV{HOME}/opt/cudnn" CACHE PATH "cuDNN 9 runtime for the CUDA EP")
+set(INFER_CUDA_ARCH "75" CACHE STRING "compute capability for the CUDA generator PTX (2080 Ti = 75)")
 # find_* results are cache variables and would survive a change of
 # ORT_ROOT / DAWN_ROOT (pointing at the previous install); re-probe every
 # configure instead.
-foreach(v ORT_LIB ORT_INCLUDE DAWN_LIB ORT_OWN_DAWN)
+foreach(v ORT_LIB ORT_INCLUDE DAWN_LIB ORT_OWN_DAWN ORT_CUDA_LIB CUDNN_LIB)
     unset(${v} CACHE)
 endforeach()
 find_library(ORT_LIB onnxruntime PATHS ${ORT_ROOT}/lib64 ${ORT_ROOT}/lib NO_DEFAULT_PATH)
@@ -296,6 +307,7 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
 
     add_library(infer STATIC infer/infer.h infer/infer_util.h infer/infer_tensor.c
                              infer/infer_ctx_gl.c infer/infer_ctx_vk.c infer/infer_ctx_wgpu.c
+                             infer/infer_ctx_cuda.c infer/infer_vk_cuda.c
                              infer/infer_edge.c infer/infer_engine_ort.c ${INFER_SPV})
     target_include_directories(infer PUBLIC infer ${ORT_INCLUDE} ${DAWN_INCLUDE}
                                      PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
@@ -303,10 +315,69 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
     target_link_libraries(infer PUBLIC ${ORT_LIB} ${DAWN_LIB}
                                        PkgConfig::GLES_DMABUF_STACK PkgConfig::VULKAN
                                        PkgConfig::LIBDRM m ${CMAKE_DL_LIBS})
+    # every infer-linked executable carries this as its rpath
+    set(INFER_RPATH ${ORT_LIBDIR} ${DAWN_LIBDIR})
+
+    # -----------------------------------------------------------------------
+    # 8b. The optional CUDA domain + EP. Three things must exist: an ORT
+    #     built with --use_cuda (its provider library), the toolkit (for
+    #     cudart and for nvcc to compile the generator), and cuDNN 9 under
+    #     CUDNN_ROOT (build-deps.sh's `cudnn` step puts it there). Any of
+    #     them missing just leaves the domain out -- infer_cuda_compiled()
+    #     returns 0 and the sweeps skip it.
+    # -----------------------------------------------------------------------
+    find_library(ORT_CUDA_LIB onnxruntime_providers_cuda
+                 PATHS ${ORT_ROOT}/lib64 ${ORT_ROOT}/lib NO_DEFAULT_PATH)
+    find_package(CUDAToolkit QUIET)
+    find_library(CUDNN_LIB NAMES cudnn libcudnn.so.9
+                 PATHS ${CUDNN_ROOT}/lib ${CUDNN_ROOT}/lib64 NO_DEFAULT_PATH)
+    if(ORT_CUDA_LIB AND CUDAToolkit_FOUND AND CUDNN_LIB)
+        get_filename_component(CUDNN_LIBDIR ${CUDNN_LIB} DIRECTORY)
+        # the generator kernel: nvcc -> PTX at configure time (the
+        # embed_glsl arrangement; re-run when the .cu changes), embedded
+        # as a C string and JIT-compiled by the driver at first use
+        execute_process(COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx
+                                -arch=compute_${INFER_CUDA_ARCH}
+                                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_gen.cu
+                                -o ${CMAKE_CURRENT_BINARY_DIR}/infer_gen.ptx
+                        RESULT_VARIABLE NVCC_RC ERROR_VARIABLE NVCC_ERR)
+        if(NOT NVCC_RC EQUAL 0)
+            message(FATAL_ERROR "nvcc failed on shaders/infer_gen.cu:\n${NVCC_ERR}")
+        endif()
+        embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/infer_gen_ptx.h
+                   ${CMAKE_CURRENT_BINARY_DIR}/infer_gen.ptx infer_gen_ptx)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/infer_gen.cu)
+        set(INFER_HAVE_CUDA ON)
+        target_compile_definitions(infer PRIVATE INFER_HAVE_CUDA=1)
+        # cudart ONLY -- CUDA::cuda_driver would put libcuda.so.1 into
+        # NEEDED and the binaries would then refuse to LOAD on a machine
+        # without the NVIDIA driver; cudart resolves it lazily and reports
+        # "no device" instead, which is what the probes want to hear.
+        target_link_libraries(infer PUBLIC CUDA::cudart)
+        list(APPEND INFER_RPATH ${CUDAToolkit_LIBRARY_DIR} ${CUDNN_LIBDIR})
+        # DT_RPATH, not RUNPATH: libonnxruntime_providers_cuda.so carries
+        # no rpath of its own, NEEDs cublas/cudart and dlopens
+        # libcudnn.so.9 by name, and only the executable's old-style RPATH
+        # reaches the search path of an object we did not link ourselves
+        # (ld.so(8), search order step 1). This is what makes the CUDA EP
+        # loadable with no ld.so.conf entry and no LD_LIBRARY_PATH -- the
+        # same "no environment needed" rule the BUILD_RPATH already
+        # serves. The flip side: RPATH beats LD_LIBRARY_PATH, so a moved
+        # install means re-configuring, which the unset() loop above
+        # forces anyway.
+        target_link_options(infer INTERFACE "LINKER:--disable-new-dtags")
+        message(STATUS "infer: CUDA EP ${ORT_CUDA_LIB}; toolkit ${CUDAToolkit_VERSION}; "
+                       "cuDNN ${CUDNN_LIB}")
+    else()
+        message(STATUS "infer: no CUDA EP (providers_cuda=${ORT_CUDA_LIB}, "
+                       "toolkit=${CUDAToolkit_FOUND}, cudnn=${CUDNN_LIB}) -- "
+                       "cpu and webgpu only")
+    endif()
 
     add_executable(hello_inference hello/hello_inference.c)
     target_link_libraries(hello_inference PRIVATE infer)
-    set_target_properties(hello_inference PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+    set_target_properties(hello_inference PROPERTIES BUILD_RPATH "${INFER_RPATH}")
 
     enable_testing()
     add_test(NAME infer_cpu_cpu
@@ -334,17 +405,21 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
     embed_glsl(${CMAKE_CURRENT_BINARY_DIR}/hand_frame_to_tensor_wgsl.h
                ${CMAKE_CURRENT_SOURCE_DIR}/shaders/hand_frame_to_tensor.wgsl
                hand_frame_to_tensor_wgsl)
+    # the same pass for the headless Vulkan device (the CUDA EP's feed)
+    add_spirv_shaders(HAND_SPV hand_frame_to_tensor.comp)
 
     add_library(hand STATIC hand/hand.h hand/hand_frame.h hand/hand_affine.h hand/hand_model.h
                             hand/hand_overlay.h hand/hand_tracker.h
                             hand/hand_decode.c hand/hand_model.c hand/hand_tracker.c
-                            hand/hand_frame_cpu.c hand/hand_frame_wgpu.c)
+                            hand/hand_frame_cpu.c hand/hand_frame_wgpu.c hand/hand_frame_vk.c
+                            ${HAND_SPV})
     target_include_directories(hand PUBLIC hand PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_compile_definitions(hand PRIVATE SHADER_DIR="${SHADER_OUT_DIR}")
     target_link_libraries(hand PUBLIC infer camera Threads::Threads m)
 
     add_executable(hello_hand hello/hello_hand.c)
     target_link_libraries(hello_hand PRIVATE hand)
-    set_target_properties(hello_hand PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+    set_target_properties(hello_hand PROPERTIES BUILD_RPATH "${INFER_RPATH}")
 
     # The fixture is a raw NV12 frame captured by hello_hand --dump-frame the
     # moment a real detection happened, so the tests below are reproducible.
@@ -369,8 +444,29 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
     # the acceptance test: both providers must find the same hand
     add_test(NAME hand_both
              COMMAND hello_hand ${HAND_FRAME} ${HAND_MODELS}
-                     --both --iters 2 --warmup 1 --strict)
+                     --both --iters 2 --warmup 3 --strict)
     set_tests_properties(hand_frame_agree hand_both PROPERTIES LABELS gpu)
+
+    if(INFER_HAVE_CUDA)
+        # warmup 3 wherever the CUDA EP runs captured: capture lands on the
+        # third run and its CaptureEnd pays one hidden stream sync
+        add_test(NAME infer_cuda_zero_copy
+                 COMMAND hello_inference --src cuda --ep cuda --dst cuda --iters 5 --warmup 3
+                         --strict --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
+        add_test(NAME infer_cpu_cuda
+                 COMMAND hello_inference --src cpu --ep cuda --dst cpu --iters 3 --warmup 3
+                         --strict --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
+        # the full 108-cell sweep; infer_all_synthetic above keeps its
+        # meaning (the non-CUDA 100 cells) on machines without CUDA
+        add_test(NAME infer_all_cuda
+                 COMMAND hello_inference --all --iters 5 --warmup 3 --strict
+                         --model ${CMAKE_CURRENT_SOURCE_DIR}/models/synthetic_conv.onnx)
+        add_test(NAME hand_cuda
+                 COMMAND hello_hand ${HAND_FRAME} ${HAND_MODELS}
+                         --stage landmark --ep cuda --iters 2 --warmup 3 --strict)
+        set_tests_properties(infer_cuda_zero_copy infer_cpu_cuda infer_all_cuda hand_cuda
+                             PROPERTIES LABELS "gpu;cuda")
+    endif()
 
     # The windowed scenes: the SAME three stage-three sources, compiled a
     # second time with SCENE_HAND=1. cam_* above are untouched, which is
@@ -382,14 +478,14 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
     target_compile_definitions(hand_vulkan PRIVATE SHADER_DIR="${SHADER_OUT_DIR}" SCENE_HAND=1)
     target_include_directories(hand_vulkan PRIVATE scenes)
     target_link_libraries(hand_vulkan PRIVATE vk_present camera hand PkgConfig::LIBDRM)
-    set_target_properties(hand_vulkan PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+    set_target_properties(hand_vulkan PROPERTIES BUILD_RPATH "${INFER_RPATH}")
 
     add_executable(hand_shm scenes/scene_cam_shm.c hand/hand_overlay_cpu.c
                             scenes/raster.h scenes/cube_mesh.h scenes/mat4.h)
     target_compile_definitions(hand_shm PRIVATE SCENE_HAND=1)
     target_include_directories(hand_shm PRIVATE scenes)
     target_link_libraries(hand_shm PRIVATE shm_present camera hand m)
-    set_target_properties(hand_shm PROPERTIES BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+    set_target_properties(hand_shm PROPERTIES BUILD_RPATH "${INFER_RPATH}")
 
     foreach(m DMABUF EGLSURFACE)
         string(TOLOWER ${m} ml)
@@ -399,8 +495,7 @@ if(ORT_LIB AND DAWN_LIB AND ORT_INCLUDE AND (GLSLC OR GLSLANG))
                                    PRIVATE CAM_GLES_MODE=GLES_MODE_${m} SCENE_HAND=1)
         target_include_directories(hand_gles_${ml} PRIVATE ${CMAKE_CURRENT_BINARY_DIR} scenes)
         target_link_libraries(hand_gles_${ml} PRIVATE gles_present camera hand)
-        set_target_properties(hand_gles_${ml} PROPERTIES
-                              BUILD_RPATH "${ORT_LIBDIR};${DAWN_LIBDIR}")
+        set_target_properties(hand_gles_${ml} PROPERTIES BUILD_RPATH "${INFER_RPATH}")
     endforeach()
 else()
     message(WARNING "onnxruntime with WebGPU not found under ORT_ROOT=${ORT_ROOT} "

@@ -4,14 +4,18 @@
  * A camera frame is pixels with a colour space; a model input is
  * normalised NHWC floats. Turning one into the other is not an edge (an
  * edge preserves meaning and changes memory) -- it is a pass, and it
- * exists twice, once per execution provider:
+ * exists once per execution provider:
  *
  *   CPU EP      hand_frame_to_tensor_cpu:  a C loop over the frame's mmap
  *   WebGPU EP   hand_frame_to_tensor_wgpu: one compute pass over the
  *               frame's dma-buf, imported into the shared Dawn device,
  *               writing the WGPUBuffer ORT has bound
+ *   CUDA EP     hand_frame_to_tensor_vk:   the same pass on the headless
+ *               Vulkan device (CUDA imports no dma-buf, Vulkan does),
+ *               writing either a VK tensor's buffer or the opaque-fd
+ *               buffer the CUDA EP reads through its mapping
  *
- * Both are handed the same struct hand_affine and the same YUV
+ * All are handed the same struct hand_affine and the same YUV
  * coefficients (camera/nv12_convert.h's nv12_yuv_params), so they
  * compute the same tensor. hello_hand --compare-frame-to-tensor asserts
  * it, which is the check that makes an EP disagreement downstream
@@ -80,6 +84,54 @@ int hand_frame_to_tensor_wgpu(struct infer_ctx_wgpu* c,
                               struct hand_norm n,
                               enum hand_border border,
                               struct infer_tensor* t);
+
+/* The Vulkan twin, for the CUDA EP (or any consumer of a packed-float
+ * VkBuffer). `im` from infer_vk_frame_import_create; `dst` is whichever
+ * STORAGE buffer the caller owns -- a VK tensor's alias, or the shared
+ * opaque-fd buffer whose CUDA mapping the EP has bound. Submits one
+ * compute pass and returns; completion is the pass's fence
+ * (hand_frame_vk_wait) or the optional `signal` semaphore the CUDA
+ * stream waits on. `release_fd` (may be NULL) receives the submit's
+ * completion as a sync file: the "done reading this frame" fence.
+ * The next apply on the same pass waits the previous one's fence, so
+ * one pass object serialises itself. */
+struct hand_frame_pass_vk;
+struct hand_frame_pass_vk* hand_frame_pass_vk_create(struct infer_ctx_vk* c);
+void hand_frame_pass_vk_destroy(struct infer_ctx_vk* c, struct hand_frame_pass_vk* p);
+int hand_frame_to_tensor_vk(struct infer_ctx_vk* c,
+                            struct hand_frame_pass_vk* p,
+                            struct infer_vk_frame_import* im,
+                            const struct infer_frame* f,
+                            struct hand_affine a,
+                            struct hand_norm n,
+                            enum hand_border border,
+                            uint32_t tw,
+                            uint32_t th,
+                            VkBuffer dst,
+                            uint64_t dst_bytes,
+                            VkSemaphore signal,
+                            int* release_fd);
+/* The same pass writing a VK TENSOR for an EXTERNAL reader -- Dawn,
+ * through the registry's vk -> wgpu row: the WebGPU EP's feed on a
+ * driver that refuses Dawn's own import of the frame. The destination
+ * is the tensor's buffer alias; around the dispatch its image and
+ * buffer are acquired from and released to VK_QUEUE_FAMILY_EXTERNAL the
+ * way infer_vk_gen does it, the write waits the tensor's `released`
+ * fence (the reader's "done"), and the tensor's `ready` becomes the
+ * submit's completion. The tensor's own fence is the one submitted on,
+ * so its readback and release wait for this pass like for any writer.
+ * tw/th are the tensor's dims. One pass object per tensor. */
+int hand_frame_to_tensor_vk_tensor(struct infer_ctx_vk* c,
+                                   struct hand_frame_pass_vk* p,
+                                   struct infer_vk_frame_import* im,
+                                   const struct infer_frame* f,
+                                   struct hand_affine a,
+                                   struct hand_norm n,
+                                   enum hand_border border,
+                                   struct infer_tensor* t,
+                                   int* release_fd);
+/* block until the last submitted pass completed */
+int hand_frame_vk_wait(struct infer_ctx_vk* c, struct hand_frame_pass_vk* p);
 
 /* The descriptor a [1, th, tw, 3] float32 image tensor needs. Handy
  * because both stages want one and it must match what the model

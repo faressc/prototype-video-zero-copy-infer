@@ -1,16 +1,26 @@
 /* infer_engine_ort.c -- ONNX Runtime behind the engine seam: one
  * session, one IO binding, inputs and outputs both bound as tensors
  * the CALLER owns in whatever domain the EP works in (host pointers for
- * the CPU EP, WGPUBuffers for the WebGPU EP). Nothing is allocated or
- * copied here: the engine reads its input in place and writes its
- * outputs in place, and completion is the caller's token, not this
- * adapter returning.
+ * the CPU EP, WGPUBuffers for the WebGPU EP, device pointers on our
+ * stream for the CUDA EP). Nothing is allocated or copied here: the
+ * engine reads its input in place and writes its outputs in place, and
+ * completion is the caller's token, not this adapter returning.
  *
  * The WebGPU EP is given OUR Dawn device (deviceId >= 1 selects the
  * user-supplied instance/device; ORT prefixes the option keys itself).
  * A WebGPU tensor is an OrtValue whose data pointer IS the WGPUBuffer
  * handle, on memory info "WebGPU_Buffer" with OrtDevice id 0 -- the id
  * the EP's allocator reports, NOT the deviceId option (see below).
+ *
+ * The CUDA EP is given OUR stream (user_compute_stream, through the
+ * opaque V2 options -- the string-keyed generic append does not take
+ * "CUDA" in ORT 1.29) and told not to synchronise it at the end of Run
+ * (disable_synchronize_execution_providers), so Run is submission there
+ * too. A CUDA tensor is an OrtValue whose data pointer is the device
+ * pointer, on memory info "Cuda" with the device ordinal as its
+ * OrtDevice id -- for this EP the two ids ARE the same number
+ * (allocator.cc maps "Cuda" to OrtDevice{GPU, DEFAULT, NVIDIA, id}, the
+ * device its allocator reports), so no foreign-device copy arises.
  */
 #include "infer.h"
 
@@ -21,6 +31,7 @@
 #include <string.h>
 
 #include <onnxruntime_c_api.h>
+#include <onnxruntime_run_options_config_keys.h>
 
 #include "infer_util.h"
 
@@ -34,7 +45,12 @@
  * device copy under a row that says ZERO_COPY, and one that a captured
  * graph does not replay, so replays read a stale copy. Measured before
  * the ids were told apart: every capture-on cell STALE. */
-enum { ORT_WEBGPU_DEVICE_ID = 1, ORT_WEBGPU_MEM_DEVICE_ID = 0, MAX_IO = INFER_ENGINE_MAX_OUTPUTS };
+enum {
+    ORT_WEBGPU_DEVICE_ID = 1,
+    ORT_WEBGPU_MEM_DEVICE_ID = 0,
+    MAX_IO = INFER_ENGINE_MAX_OUTPUTS,
+    MAX_OPTS = 24,
+};
 
 struct infer_engine_ort {
     const OrtApi* api;
@@ -43,7 +59,7 @@ struct infer_engine_ort {
     OrtSession* session;
     OrtIoBinding* binding;
     OrtMemoryInfo* cpu_mem;
-    OrtMemoryInfo* gpu_mem;
+    OrtMemoryInfo* gpu_mem; /* the GPU EP's memory info: WebGPU_Buffer or Cuda */
     OrtAllocator* alloc;
     OrtRunOptions* run_opts;
     enum infer_ep ep;
@@ -67,13 +83,76 @@ struct infer_engine_ort {
     } while (0)
 
 enum infer_domain infer_engine_ort_input_domain(enum infer_ep ep) {
-    return ep == INFER_EP_WEBGPU ? INFER_DOMAIN_WGPU : INFER_DOMAIN_CPU;
+    switch (ep) {
+    case INFER_EP_WEBGPU: return INFER_DOMAIN_WGPU;
+    case INFER_EP_CUDA: return INFER_DOMAIN_CUDA;
+    default: return INFER_DOMAIN_CPU;
+    }
 }
 
 enum infer_domain infer_engine_ort_output_domain(enum infer_ep ep) {
     /* the kernels write where they read: the same device */
     return infer_engine_ort_input_domain(ep);
 }
+
+/* the graph-capture option, in each EP's own spelling */
+static const char* capture_key(enum infer_ep ep) {
+    return ep == INFER_EP_CUDA ? "enable_cuda_graph" : "enableGraphCapture";
+}
+
+/* ------------------------------------------------------------------ */
+/* provider options: defaults, then INFER_ORT_OPTS overrides            */
+/* ------------------------------------------------------------------ */
+
+struct opts {
+    const char* keys[MAX_OPTS];
+    const char* vals[MAX_OPTS];
+    size_t n;
+};
+
+/* set, or override an earlier key of the same name */
+static int opts_set(struct opts* o, const char* key, const char* val) {
+    for (size_t i = 0; i < o->n; i++) {
+        if (strcmp(o->keys[i], key) == 0) {
+            o->vals[i] = val;
+            return 0;
+        }
+    }
+    INFER_CHECK(o->n < MAX_OPTS, "too many EP options");
+    o->keys[o->n] = key;
+    o->vals[o->n] = val;
+    o->n++;
+    return 0;
+}
+
+/* experiments: INFER_ORT_OPTS="validationMode=disabled,enableGraphCapture=0"
+ * (WebGPU) or "enable_cuda_graph=0,cudnn_conv_algo_search=EXHAUSTIVE,
+ * prefer_nhwc=1" (CUDA). The keys and values point into one static
+ * buffer: ORT copies them on append, and one session is created at a
+ * time. */
+static int opts_from_env(struct opts* o) {
+    static char extra[256];
+    const char* env = getenv("INFER_ORT_OPTS");
+    if (!env) { return 0; }
+    snprintf(extra, sizeof extra, "%s", env);
+    for (char* tok = strtok(extra, ","); tok; tok = strtok(NULL, ",")) {
+        char* eq = strchr(tok, '=');
+        if (!eq) { continue; }
+        *eq = '\0';
+        if (opts_set(o, tok, eq + 1) < 0) { return -1; }
+    }
+    return 0;
+}
+
+/* did the environment take a position on graph capture? */
+static int capture_forced(enum infer_ep ep) {
+    const char* env = getenv("INFER_ORT_OPTS");
+    return env && strstr(env, capture_key(ep)) != NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/* the session                                                          */
+/* ------------------------------------------------------------------ */
 
 /* input 0 or output i: float32, dims with dynamic entries forced to 1 */
 static int query_desc(struct infer_engine_ort* e, int is_input, size_t i, struct infer_desc* d) {
@@ -106,9 +185,12 @@ static int query_desc(struct infer_engine_ort* e, int is_input, size_t i, struct
     return 0;
 }
 
-static int create(struct infer_engine_ort* e, struct infer_ctx* c, const char* model_path) {
+/* Fresh session options with the EP appended, graph capture as asked.
+ * Fresh every time: an EP cannot be removed from options once appended,
+ * so the capture fallback below builds them again from nothing. Fills
+ * e->so and, for a GPU EP, e->gpu_mem. */
+static int session_options_create(struct infer_engine_ort* e, struct infer_ctx* c, int capture) {
     const OrtApi* api = e->api;
-    ORT_CHECK(e, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "hello_inference", &e->env));
     ORT_CHECK(e, api->CreateSessionOptions(&e->so));
     ORT_CHECK(e, api->SetSessionGraphOptimizationLevel(e->so, ORT_ENABLE_ALL));
     ORT_CHECK(e, api->SetSessionLogSeverityLevel(e->so, getenv("INFER_ORT_VERBOSE") ? 0 : 2));
@@ -131,10 +213,12 @@ static int create(struct infer_engine_ort* e, struct infer_ctx* c, const char* m
         snprintf(inst, sizeof inst, "%" PRIuPTR, (uintptr_t)c->wgpu.instance);
         snprintf(dev, sizeof dev, "%" PRIuPTR, (uintptr_t)c->wgpu.device);
         snprintf(id, sizeof id, "%d", ORT_WEBGPU_DEVICE_ID);
-        const char* keys[16] = {"deviceId", "webgpuInstance", "webgpuDevice", "preferredLayout",
-                                "dawnBackendType"};
-        const char* vals[16] = {id, inst, dev, "NHWC", "Vulkan"};
-        size_t nkeys = 5;
+        struct opts o = {{0}, {0}, 0};
+        opts_set(&o, "deviceId", id);
+        opts_set(&o, "webgpuInstance", inst);
+        opts_set(&o, "webgpuDevice", dev);
+        opts_set(&o, "preferredLayout", "NHWC");
+        opts_set(&o, "dawnBackendType", "Vulkan");
 #ifdef INFER_ORT_EXTERNAL_DAWN
         /* ORT built with onnxruntime_USE_EXTERNAL_DAWN: it links no Dawn
          * implementation, only dawn_proc thunks, and must be handed the
@@ -147,26 +231,8 @@ static int create(struct infer_engine_ort* e, struct infer_ctx* c, const char* m
         get_procs_fn get_procs = (get_procs_fn)dlsym(RTLD_DEFAULT, "_ZN4dawn6native8GetProcsEv");
         INFER_CHECK(get_procs != NULL, "dawn::native::GetProcs not found in the loaded Dawn");
         snprintf(procs, sizeof procs, "%" PRIuPTR, (uintptr_t)get_procs());
-        keys[nkeys] = "dawnProcTable";
-        vals[nkeys] = procs;
-        nkeys++;
+        opts_set(&o, "dawnProcTable", procs);
 #endif
-        /* experiments: INFER_ORT_OPTS="validationMode=disabled,enableGraphCapture=1" */
-        static char extra[256];
-        const char* env = getenv("INFER_ORT_OPTS");
-        int capture_set = 0;
-        if (env) {
-            snprintf(extra, sizeof extra, "%s", env);
-            for (char* tok = strtok(extra, ","); tok && nkeys < 15; tok = strtok(NULL, ",")) {
-                char* eq = strchr(tok, '=');
-                if (!eq) { continue; }
-                *eq = '\0';
-                if (strcmp(tok, "enableGraphCapture") == 0) { capture_set = 1; }
-                keys[nkeys] = tok;
-                vals[nkeys] = eq + 1;
-                nkeys++;
-            }
-        }
         /* Graph capture: ORT records its command buffers once and replays
          * them -- on the palm detector 3.3 ms -> 1.1 ms of host time per
          * run, GPU time unchanged. Three things had to be true first,
@@ -178,23 +244,103 @@ static int create(struct infer_engine_ort* e, struct infer_ctx* c, const char* m
          * and the same buffers bound every run (a replay re-dispatches
          * the bind groups it captured, so rotating slots alternate stale
          * outputs) -- which is the contract of this adapter. */
-        if (!capture_set) {
-            keys[nkeys] = "enableGraphCapture";
-            vals[nkeys] = "1";
-            nkeys++;
-        }
-        ORT_CHECK(e, api->SessionOptionsAppendExecutionProvider(e->so, "WebGPU", keys, vals, nkeys));
+        opts_set(&o, capture_key(e->ep), capture ? "1" : "0");
+        if (opts_from_env(&o) < 0) { return -1; }
+        ORT_CHECK(e, api->SessionOptionsAppendExecutionProvider(e->so, "WebGPU", o.keys, o.vals, o.n));
         ORT_CHECK(e,
                   api->CreateMemoryInfo("WebGPU_Buffer",
                                         OrtDeviceAllocator,
                                         ORT_WEBGPU_MEM_DEVICE_ID,
                                         OrtMemTypeDefault,
                                         &e->gpu_mem));
+    } else if (e->ep == INFER_EP_CUDA) {
+        INFER_CHECK(c->have & INFER_WANT_CUDA,
+                    "CUDA EP needs the CUDA context (built without CUDA, or no device)");
+        char dev[8], stream[32];
+        snprintf(dev, sizeof dev, "%d", c->cuda.device);
+        snprintf(stream, sizeof stream, "%" PRIuPTR, (uintptr_t)c->cuda.stream);
+        struct opts o = {{0}, {0}, 0};
+        opts_set(&o, "device_id", dev);
+        /* our stream: every kernel the EP launches is ordered behind our
+         * H2D copy and ahead of our D2H copy / stream wait, with no
+         * cross-stream events to get wrong */
+        opts_set(&o, "has_user_compute_stream", "1");
+        opts_set(&o, "user_compute_stream", stream);
+        /* EXHAUSTIVE (ORT's default) runs cudnnFind for every conv shape
+         * the first time a session sees it -- seconds per session, and
+         * hello_inference --all creates 36 CUDA sessions. HEURISTIC asks
+         * cuDNN's model instead; INFER_ORT_OPTS=cudnn_conv_algo_search=
+         * EXHAUSTIVE for the perf numbers. */
+        opts_set(&o, "cudnn_conv_algo_search", "HEURISTIC");
+        /* CUDA graphs: the kernel launches of one Run are recorded (on the
+         * third run) and replayed thereafter -- the same host-time saving
+         * the WebGPU EP's capture buys, under the same rule: the same
+         * device addresses bound every run. ORT refuses it for a graph
+         * with any node off the CUDA EP; create() then retries without. */
+        opts_set(&o, capture_key(e->ep), capture ? "1" : "0");
+        if (opts_from_env(&o) < 0) { return -1; }
+        OrtCUDAProviderOptionsV2* co = NULL;
+        ORT_CHECK(e, api->CreateCUDAProviderOptions(&co));
+        OrtStatus* st = api->UpdateCUDAProviderOptions(co, o.keys, o.vals, o.n);
+        if (!st) { st = api->SessionOptionsAppendExecutionProvider_CUDA_V2(e->so, co); }
+        api->ReleaseCUDAProviderOptions(co);
+        if (st) {
+            fprintf(stderr, "ORT: CUDA EP: %s\n", api->GetErrorMessage(st));
+            api->ReleaseStatus(st);
+            return -1;
+        }
+        ORT_CHECK(e,
+                  api->CreateMemoryInfo("Cuda",
+                                        OrtDeviceAllocator,
+                                        c->cuda.device,
+                                        OrtMemTypeDefault,
+                                        &e->gpu_mem));
+    }
+    return 0;
+}
+
+static int create(struct infer_engine_ort* e, struct infer_ctx* c, const char* model_path) {
+    const OrtApi* api = e->api;
+    ORT_CHECK(e, api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "hello_inference", &e->env));
+
+    /* capture on for both GPU EPs unless INFER_ORT_OPTS says otherwise */
+    if (session_options_create(e, c, 1) < 0) { return -1; }
+    OrtStatus* st = api->CreateSession(e->env, model_path, e->so, &e->session);
+    if (st && e->ep == INFER_EP_CUDA && !capture_forced(e->ep) &&
+        strstr(api->GetErrorMessage(st), "have not been partitioned")) {
+        /* a node the CUDA EP has no kernel for stays on the CPU EP, and
+         * ORT will not capture a graph that crosses devices. Say so, and
+         * run the session without capture rather than not at all. */
+        fprintf(stderr, "ORT: CUDA graph capture refused (%s); running without\n",
+                api->GetErrorMessage(st));
+        api->ReleaseStatus(st);
+        st = NULL;
+        api->ReleaseSessionOptions(e->so);
+        e->so = NULL;
+        if (e->gpu_mem) {
+            api->ReleaseMemoryInfo(e->gpu_mem);
+            e->gpu_mem = NULL;
+        }
+        if (session_options_create(e, c, 0) < 0) { return -1; }
+        st = api->CreateSession(e->env, model_path, e->so, &e->session);
+    }
+    if (st) {
+        fprintf(stderr, "ORT: CreateSession: %s\n", api->GetErrorMessage(st));
+        api->ReleaseStatus(st);
+        return -1;
     }
     ORT_CHECK(e, api->CreateMemoryInfo("Cpu", OrtDeviceAllocator, 0, OrtMemTypeDefault, &e->cpu_mem));
-    ORT_CHECK(e, api->CreateSession(e->env, model_path, e->so, &e->session));
     ORT_CHECK(e, api->GetAllocatorWithDefaultOptions(&e->alloc));
     ORT_CHECK(e, api->CreateRunOptions(&e->run_opts));
+    if (e->ep == INFER_EP_CUDA) {
+        /* Run returns at submission: no cudaStreamSynchronize at the end
+         * of the run (nor after a graph replay). The consumer's wait on
+         * its tensor is the completion, as for WebGPU. Without this the
+         * `run` column would silently include the GPU time. */
+        ORT_CHECK(e, api->AddRunConfigEntry(e->run_opts,
+                                           kOrtRunOptionsConfigDisableSynchronizeExecutionProviders,
+                                           "1"));
+    }
 
     size_t n_in = 0;
     ORT_CHECK(e, api->SessionGetInputCount(e->session, &n_in));
@@ -255,9 +401,25 @@ static int wrap(struct infer_engine_ort* e,
                 const struct infer_desc* shape,
                 OrtValue** out) {
     const OrtApi* api = e->api;
-    void* data = t->domain == INFER_DOMAIN_WGPU ? (void*)t->mem.wgpu.buffer : (void*)t->mem.cpu.ptr;
-    const OrtMemoryInfo* mi = t->domain == INFER_DOMAIN_WGPU ? e->gpu_mem : e->cpu_mem;
+    void* data;
+    const OrtMemoryInfo* mi;
+    switch (t->domain) {
+    case INFER_DOMAIN_WGPU:
+        data = (void*)t->mem.wgpu.buffer;
+        mi = e->gpu_mem;
+        break;
+    case INFER_DOMAIN_CUDA:
+        data = t->mem.cuda.ptr;
+        mi = e->gpu_mem;
+        break;
+    default:
+        data = (void*)t->mem.cpu.ptr;
+        mi = e->cpu_mem;
+        break;
+    }
     INFER_CHECK(data, "tensor has no memory");
+    INFER_CHECK(mi, "no memory info for the %s domain on the %s EP", infer_domain_name(t->domain),
+                infer_ep_name(e->ep));
     if (*out) {
         api->ReleaseValue(*out);
         *out = NULL;

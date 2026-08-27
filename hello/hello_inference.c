@@ -1,8 +1,8 @@
 /* hello_inference.c -- the hello world of inference: a tensor produced
- * on {cpu, gl, vk, wgpu, dmabuf}, moved along a registry edge into the
- * domain the {cpu, webgpu} execution provider of ONNX Runtime reads,
- * run, and its outputs moved along a second edge into the domain a
- * consumer on {cpu, gl, vk, wgpu, dmabuf} wants them in. Every cell
+ * on {cpu, gl, vk, wgpu, dmabuf, cuda}, moved along a registry edge into
+ * the domain the {cpu, webgpu, cuda} execution provider of ONNX Runtime
+ * reads, run, and its outputs moved along a second edge into the domain
+ * a consumer on {cpu, gl, vk, wgpu, dmabuf, cuda} wants them in. Every cell
  * reports which two edges it took and what each costs, whether the
  * bytes that reached the engine are bit-identical to the CPU generator,
  * how far the outputs the consumer sees are from the CPU reference, and
@@ -60,10 +60,20 @@ static int is_dmabuf_domain(enum infer_domain d) {
 /* What an edge between two domains must cost, from first principles --
  * independent of the registry, so --strict can catch the registry (or
  * a driver) quietly downgrading a path. Symmetric: the price of moving
- * a into b is the price of moving b into a. */
+ * a into b is the price of moving b into a. The CUDA domain: DEVICE_COPY
+ * against VK (the opaque-fd bridge -- CUDA imports no dma-buf, but it
+ * imports OPAQUE_FD memory, and Vulkan can export a second buffer that
+ * way) and against WGPU (the dmabuf_bridge: Dawn's relayout into a
+ * VK-exported staging tensor, one VK copy, the stream's D2D -- device
+ * hops throughout), HOST_COPY against GL/dmabuf until an EGL interop
+ * route exists -- when it does, its pair moves here first. */
 static enum infer_cost expected_cost(enum infer_domain a, enum infer_domain b) {
     if (a == b) { return INFER_COST_ZERO_COPY; }
     if ((a == INFER_DOMAIN_WGPU && is_dmabuf_domain(b)) || (b == INFER_DOMAIN_WGPU && is_dmabuf_domain(a))) {
+        return INFER_COST_DEVICE_COPY;
+    }
+    if ((a == INFER_DOMAIN_CUDA && (b == INFER_DOMAIN_VK || b == INFER_DOMAIN_WGPU)) ||
+        (b == INFER_DOMAIN_CUDA && (a == INFER_DOMAIN_VK || a == INFER_DOMAIN_WGPU))) {
         return INFER_COST_DEVICE_COPY;
     }
     if ((a == INFER_DOMAIN_DMABUF && b == INFER_DOMAIN_CPU) ||
@@ -398,10 +408,10 @@ static void print_result(const struct cell_result* r) {
 
 static void usage(void) {
     fprintf(stderr,
-            "usage: hello_inference [--src D] [--ep cpu|webgpu] [--dst D] [--model path]\n"
+            "usage: hello_inference [--src D] [--ep cpu|webgpu|cuda] [--dst D] [--model path]\n"
             "                       [--iters N] [--warmup N] [--seed S] [--all] [--strict] [--verbose]\n"
-            "       D = cpu|gl|vk|wgpu|dmabuf: --src is where the input is produced, --dst is\n"
-            "       where a consumer wants the outputs; --all sweeps every (src, ep, dst).\n");
+            "       D = cpu|gl|vk|wgpu|dmabuf|cuda: --src is where the input is produced, --dst\n"
+            "       is where a consumer wants the outputs; --all sweeps every (src, ep, dst).\n");
 }
 
 int main(int argc, char** argv) {
@@ -452,13 +462,25 @@ int main(int argc, char** argv) {
     if (o.iters < 1) { o.iters = 1; }
     infer_verbose = o.verbose;
 
+    /* The CUDA domain is a build-time option: without it, --all leaves
+     * its rows and columns out rather than reporting 58 "no in-edge"
+     * cells on every machine but one. WITH it and without a device the
+     * cells fail, as a missing WebGPU device would -- that is the cuda
+     * ctest label's job. */
+    const int skip_cuda = !infer_cuda_compiled();
     unsigned want = 0;
     if (o.all) {
         want = INFER_WANT_GL | INFER_WANT_VK | INFER_WANT_WGPU | INFER_WANT_DMABUF;
+        if (!skip_cuda) { want |= INFER_WANT_CUDA; }
     } else {
         if (o.src != INFER_DOMAIN_CPU) { want |= 1u << o.src; }
         if (o.dst != INFER_DOMAIN_CPU) { want |= 1u << o.dst; }
-        if (o.ep == INFER_EP_WEBGPU) { want |= INFER_WANT_WGPU; }
+        if (o.ep != INFER_EP_CPU) { want |= 1u << infer_engine_ort_input_domain(o.ep); }
+        /* the CUDA bridges ride on the Vulkan device (opaque fd), so a
+         * cell touching CUDA gets DEVICE_COPY edges only with VK up */
+        if (o.ep == INFER_EP_CUDA || o.src == INFER_DOMAIN_CUDA || o.dst == INFER_DOMAIN_CUDA) {
+            want |= INFER_WANT_VK;
+        }
     }
     struct infer_ctx ctx;
     infer_ctx_init_all(&ctx, want); /* best effort; cells report what is missing */
@@ -509,11 +531,15 @@ int main(int argc, char** argv) {
         }
     } else {
         double tol = strstr(o.model, "synthetic") ? 1e-4 : 1e-3;
+        if (skip_cuda) { fprintf(stderr, "skipping cuda: built without the CUDA domain\n"); }
         for (int ep = 0; ep < INFER_EP_COUNT; ep++) {
             enum infer_domain in_dom = infer_engine_ort_input_domain((enum infer_ep)ep);
             enum infer_domain out_dom = infer_engine_ort_output_domain((enum infer_ep)ep);
+            if (skip_cuda && in_dom == INFER_DOMAIN_CUDA) { continue; }
             for (int dst = 0; dst < INFER_DOMAIN_COUNT; dst++) {
+                if (skip_cuda && dst == INFER_DOMAIN_CUDA) { continue; }
                 for (int src = 0; src < INFER_DOMAIN_COUNT; src++) {
+                    if (skip_cuda && src == INFER_DOMAIN_CUDA) { continue; }
                     struct cell_result r;
                     if (src == INFER_DOMAIN_CPU && ep == INFER_EP_CPU && dst == INFER_DOMAIN_CPU) {
                         r = ref_res;
@@ -537,8 +563,8 @@ int main(int argc, char** argv) {
                "bit against the generator. err: max |out - reference|. Times are medians in us.\n"
                "in_edge moves the input from src into the EP's input domain; out_edge moves the\n"
                "outputs from the EP's output domain into dst. GPU producers and edges only\n"
-               "submit: run is the engine call (WebGPU EP: submission), wait the wait for the\n"
-               "consumer's ready token -- the time the engine call returning does not cover.\n"
+               "submit: run is the engine call (WebGPU / CUDA EP: submission), wait the wait for\n"
+               "the consumer's ready token -- the time the engine call returning does not cover.\n"
                "total is the median of per-iteration gen+in+run+out+wait: wall-clock latency\n"
                "from starting to produce the input to the outputs being ready in dst.\n");
     }

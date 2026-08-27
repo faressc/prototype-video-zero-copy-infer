@@ -60,12 +60,14 @@ enum infer_domain {
     INFER_DOMAIN_VK,
     INFER_DOMAIN_WGPU,
     INFER_DOMAIN_DMABUF,
+    INFER_DOMAIN_CUDA, /* device memory on the CUDA runtime's stream (a discrete NVIDIA GPU) */
     INFER_DOMAIN_COUNT,
 };
 
 enum infer_ep {
     INFER_EP_CPU,
     INFER_EP_WEBGPU,
+    INFER_EP_CUDA,
     INFER_EP_COUNT,
 };
 
@@ -170,6 +172,10 @@ struct infer_mem_dmabuf {
     void* map;   /* mmap of the whole buffer (CPU side of a UMA machine) */
     size_t size; /* bytes allocated (page rounded) */
 };
+struct infer_mem_cuda {
+    void* ptr;   /* cudaMalloc'd device pointer (packed floats) */
+    size_t size; /* bytes allocated */
+};
 
 struct infer_tensor {
     enum infer_domain domain;
@@ -180,6 +186,7 @@ struct infer_tensor {
         struct infer_mem_vk vk;
         struct infer_mem_wgpu wgpu;
         struct infer_mem_dmabuf dmabuf;
+        struct infer_mem_cuda cuda;
     } mem;
     struct infer_sync ready;    /* producer -> consumer: data valid once signaled */
     struct infer_sync released; /* consumer -> producer: may overwrite once signaled */
@@ -271,7 +278,14 @@ struct infer_ctx_vk {
     PFN_vkGetMemoryFdKHR get_memory_fd;
     PFN_vkGetSemaphoreFdKHR get_semaphore_fd;
     PFN_vkImportSemaphoreFdKHR import_semaphore_fd;
+    PFN_vkGetMemoryFdPropertiesKHR get_fd_props; /* import side */
     int has_dmabuf_export, has_drm_modifier, has_sync_fd, has_foreign_queue;
+    int has_dmabuf_import;
+    int has_ycbcr; /* samplerYcbcrConversion on: multiplanar images may be created */
+    /* infer_vk_frame_multiplanar_importable's last answer (1 / -1, 0 =
+     * never asked) and the frame geometry it was for */
+    int mp_probe_result;
+    uint32_t mp_probe_key[6];
 };
 
 struct infer_ctx_wgpu {
@@ -287,10 +301,28 @@ struct infer_ctx_wgpu {
     int errors; /* uncaptured errors seen (the callback counts them) */
 };
 
+/* The CUDA runtime, kept behind void* so this header needs no CUDA
+ * headers: the domain is optional (INFER_HAVE_CUDA at build time, a
+ * driver at run time) and every other file compiles the same with or
+ * without it. One non-blocking stream for everything -- our generator,
+ * our copies, and ONNX Runtime's kernels (the EP is handed this stream
+ * as user_compute_stream) -- so ordering on the stream is the
+ * completion token, exactly as the WGPU queue is for that domain. */
+struct infer_ctx_cuda {
+    int owned;
+    int device;      /* the CUDA device ordinal (INFER_CUDA_DEVICE, default 0) */
+    void* stream;    /* cudaStream_t */
+    void* library;   /* cudaLibrary_t: the generator's PTX, loaded */
+    void* kernel;    /* cudaKernel_t: infer_gen */
+    int cc_major, cc_minor;
+    char name[64];
+};
+
 struct infer_ctx {
     struct infer_ctx_gl gl;
     struct infer_ctx_vk vk;
     struct infer_ctx_wgpu wgpu;
+    struct infer_ctx_cuda cuda;
     unsigned have; /* bit per INFER_DOMAIN_* that initialised */
 };
 
@@ -299,6 +331,7 @@ enum {
     INFER_WANT_VK = 1u << INFER_DOMAIN_VK,
     INFER_WANT_WGPU = 1u << INFER_DOMAIN_WGPU,
     INFER_WANT_DMABUF = 1u << INFER_DOMAIN_DMABUF, /* needs /dev/dma_heap/system */
+    INFER_WANT_CUDA = 1u << INFER_DOMAIN_CUDA,     /* needs INFER_HAVE_CUDA + a device */
 };
 
 int infer_ctx_gl_init(struct infer_ctx_gl* c, const char* render_node);
@@ -320,6 +353,12 @@ void infer_ctx_vk_fini(struct infer_ctx_vk* c);
 int infer_ctx_wgpu_init(struct infer_ctx_wgpu* c);
 int infer_ctx_wgpu_borrow(struct infer_ctx_wgpu* c, WGPUInstance instance, WGPUDevice device);
 void infer_ctx_wgpu_fini(struct infer_ctx_wgpu* c);
+
+/* 1 when the library was built with the CUDA domain (INFER_HAVE_CUDA);
+ * 0 means init below always fails and the sweeps skip the domain. */
+int infer_cuda_compiled(void);
+int infer_ctx_cuda_init(struct infer_ctx_cuda* c);
+void infer_ctx_cuda_fini(struct infer_ctx_cuda* c);
 
 /* Best effort: bring up what `want` asks for; c->have says what came up. */
 int infer_ctx_init_all(struct infer_ctx* c, unsigned want);
@@ -394,6 +433,23 @@ int infer_wgpu_gen(struct infer_ctx_wgpu* c,
                    struct infer_tensor* t);
 int infer_wgpu_readback(struct infer_ctx_wgpu* c, const struct infer_tensor* t, float* dst);
 void infer_wgpu_release(struct infer_ctx_wgpu* c, struct infer_tensor* t);
+/* CUDA: cudaMalloc'd device memory on the shared stream. upload/readback
+ * are cudaMemcpyAsync on that stream; readback also waits for it, so the
+ * host floats are complete on return (the map_read contract). upload
+ * from pageable memory returns once the source has been staged, so the
+ * caller may overwrite `src` immediately -- keep that in mind before
+ * switching the staging buffers to pinned memory. */
+int infer_cuda_alloc(struct infer_ctx_cuda* c, const struct infer_desc* d, struct infer_tensor* t);
+int infer_cuda_gen(struct infer_ctx_cuda* c,
+                   const struct infer_desc* d,
+                   uint32_t seed,
+                   struct infer_tensor* t);
+int infer_cuda_upload(struct infer_ctx_cuda* c, const float* src, struct infer_tensor* t);
+int infer_cuda_readback(struct infer_ctx_cuda* c, const struct infer_tensor* t, float* dst);
+void infer_cuda_release(struct infer_ctx_cuda* c, struct infer_tensor* t);
+/* block until everything submitted to the stream so far has executed:
+ * the CUDA domain's completion token, the twin of infer_wgpu_wait_idle */
+int infer_cuda_wait_idle(struct infer_ctx_cuda* c);
 /* the foreign dma-buf: a dma-heap allocation written through its mmap
  * (bracketed by DMA_BUF_IOCTL_SYNC so the GPU sees it on a UMA machine) */
 int infer_dmabuf_available(void);
@@ -490,6 +546,46 @@ int infer_wgpu_frame_end(struct infer_ctx_wgpu* c,
                          int* release_fd);
 void infer_wgpu_frame_import_destroy(void* im);
 
+/* A camera frame's dma-buf planes imported into the HEADLESS Vulkan
+ * device, to be read by a compute pass (hand/hand_frame_vk.c) -- the
+ * Vulkan twin of infer_wgpu_frame_import, feeding the CUDA EP the way
+ * the Dawn import feeds the WebGPU EP. One difference of mechanism:
+ * instead of one multiplanar image (which would drag in
+ * SamplerYcbcrConversion for a conversion the shader does itself), each
+ * plane is imported as its OWN single-plane LINEAR image over the same
+ * fd at the plane's offset -- NV12 becomes an R8 image plus a half-size
+ * RG8 image, the YUYV-as-ABGR substitution one RGBA8 image (feed it
+ * hand_frame_import_desc's output). No begin/end bracket: V4L2 hands
+ * out no fences, and the pass submit's own completion is exported as
+ * the release fd. Returns NULL when the driver refuses the import; the
+ * caller's fallback is the host path (the C pass + memcpy_h2d). */
+struct infer_vk_frame_import;
+struct infer_vk_frame_import* infer_vk_frame_import_create(struct infer_ctx_vk* c,
+                                                           const struct infer_frame* f);
+/* plane 0 = luma (R8) or the packed YUYV-as-ABGR plane; plane 1 = NV12
+ * chroma (RG8, half size), VK_NULL_HANDLE for single-plane imports. */
+VkImageView infer_vk_frame_plane(const struct infer_vk_frame_import* im, int plane);
+/* record the acquire barriers into `cmd`, fresh per pass: the frame's
+ * bytes change outside Vulkan between uses (first use establishes
+ * GENERAL, later ones are a FOREIGN/EXTERNAL-family acquire) */
+int infer_vk_frame_acquire(struct infer_ctx_vk* c,
+                           struct infer_vk_frame_import* im,
+                           VkCommandBuffer cmd);
+void infer_vk_frame_import_destroy(void* im);
+
+/* Would this driver import the frame as ONE multiplanar linear image --
+ * the import Dawn's SharedTextureMemory makes of an NV12 dma-buf? Asked
+ * on OUR VkDevice, where a refusal is a return code: Dawn's own import
+ * cannot survive one (it closes an fd the NVIDIA driver already closed
+ * on some failures, and counts the failure as a device loss), so the
+ * caller learns beforehand whether the WebGPU frame import may be
+ * attempted at all. 1 = imports, 0 = refused, -1 = cannot tell (no
+ * Vulkan device, no multiplanar support, or not an NV12 frame -- the
+ * single-plane imports are not the question). Measured on the 2080 Ti /
+ * 610.43: refused in every linear layout (the driver wants each memory
+ * plane 64 KiB aligned); Honeykrisp imports it. Cached per geometry. */
+int infer_vk_frame_multiplanar_importable(struct infer_ctx_vk* c, const struct infer_frame* f);
+
 /* A readback that is POLLED instead of waited on: infer_wgpu_readback
  * blocks in wgpuInstanceWaitAny(UINT64_MAX), which a render loop cannot
  * do. submit() copies into a MapRead staging buffer and starts the map;
@@ -535,6 +631,66 @@ int infer_edge_cache_put(struct infer_edge_cache* k,
 /* drop every import; call before the tensors it refers to are released */
 void infer_edge_cache_fini(struct infer_edge_cache* k);
 
+/* VK <-> CUDA without host memory (infer_vk_cuda.c): CUDA imports no
+ * dma-buf, but it does import OPAQUE_FD memory and semaphores -- so the
+ * bridge is a second, opaque-fd-exportable VkBuffer per tensor (cached
+ * by the edge, keyed by the VK tensor), mapped into CUDA once. One
+ * VK copy moves the tensor into (or out of) that buffer, and CUDA reads
+ * or writes the same pages directly on the shared stream, ordered by a
+ * pair of binary semaphores exported the same way. DEVICE_COPY: one GPU
+ * copy each way, no host memory. Probe + the two edge bodies: */
+int infer_vk_cuda_available(struct infer_ctx* c);
+int infer_vk_cuda_to_cuda(struct infer_ctx* c,
+                          struct infer_edge_cache* k,
+                          struct infer_tensor* src,
+                          struct infer_tensor* dst);
+int infer_vk_cuda_from_cuda(struct infer_ctx* c,
+                            struct infer_edge_cache* k,
+                            struct infer_tensor* src,
+                            struct infer_tensor* dst);
+
+/* The same crossing, standalone, for a PASS to write: an OPAQUE_FD
+ * VkBuffer (STORAGE | TRANSFER) mapped into CUDA once, plus one binary
+ * semaphore (opaque fd, imported) to order "the pass wrote it" against
+ * "the stream reads it". This is how the CUDA EP's FrameToTensor works
+ * (hand_frame_vk.c writes the buffer, ORT's kernels read the mapping):
+ * signal `semaphore` in the writing submit, then stream_wait before the
+ * run. The CUDA pointer is stable for the buffer's life -- exactly what
+ * graph capture requires of a bound input. NULL / -1 without
+ * INFER_HAVE_CUDA or when the driver refuses. */
+struct infer_vk_cuda_buf;
+struct infer_vk_cuda_buf* infer_vk_cuda_buf_create(struct infer_ctx* c, size_t bytes);
+VkBuffer infer_vk_cuda_buf_vk(const struct infer_vk_cuda_buf* b);
+void* infer_vk_cuda_buf_ptr(const struct infer_vk_cuda_buf* b);
+VkSemaphore infer_vk_cuda_buf_semaphore(const struct infer_vk_cuda_buf* b);
+int infer_vk_cuda_buf_stream_wait(struct infer_ctx* c, struct infer_vk_cuda_buf* b);
+void infer_vk_cuda_buf_destroy(void* b);
+/* The pieces the wgpu <-> cuda bridge composes (infer_edge.c): one VK
+ * copy between a VK tensor (Dawn's dma-buf staging) and the shared
+ * buffer, and the stream's D2D between the mapping and a CUDA tensor.
+ * from_tensor waits the tensor's ready fence host-side and signals the
+ * buffer's semaphore for the stream; to_tensor waits the semaphore on
+ * the device (the stream signalled it via stream_signal) and hands back
+ * its completion as a sync file for whoever reads the tensor next. */
+int infer_vk_cuda_buf_from_tensor(struct infer_ctx* c,
+                                  struct infer_vk_cuda_buf* b,
+                                  struct infer_tensor* t);
+int infer_vk_cuda_buf_to_tensor(struct infer_ctx* c,
+                                struct infer_vk_cuda_buf* b,
+                                struct infer_tensor* t,
+                                int* ready_fd);
+int infer_vk_cuda_buf_stream_signal(struct infer_ctx* c, struct infer_vk_cuda_buf* b);
+/* stream D2D: the buffer's byte-image rows (desc's pitch) <-> a packed
+ * CUDA tensor */
+int infer_vk_cuda_buf_read_into(struct infer_ctx* c,
+                                struct infer_vk_cuda_buf* b,
+                                const struct infer_desc* d,
+                                struct infer_tensor* dst);
+int infer_vk_cuda_buf_write_from(struct infer_ctx* c,
+                                 struct infer_vk_cuda_buf* b,
+                                 const struct infer_desc* d,
+                                 const struct infer_tensor* src);
+
 struct infer_edge;
 typedef int (*infer_edge_probe_fn)(struct infer_ctx* c);
 typedef int (*infer_edge_convert_fn)(struct infer_ctx* c,
@@ -569,7 +725,7 @@ struct infer_edge {
     int available; /* filled by infer_registry_probe */
 };
 
-enum { INFER_MAX_EDGES = 24 };
+enum { INFER_MAX_EDGES = 32 }; /* 16 rows + the 11 CUDA rows */
 
 struct infer_registry {
     struct infer_edge edges[INFER_MAX_EDGES];
@@ -607,14 +763,19 @@ enum { INFER_ENGINE_MAX_OUTPUTS = 8 };
 
 /* the domain the EP reads its input from, and the one it writes its
  * outputs to: host memory for the CPU EP, WGPUBuffers on our Dawn device
- * for the WebGPU EP. The caller owns both sides. */
+ * for the WebGPU EP, device memory on our stream for the CUDA EP. The
+ * caller owns both sides. */
 enum infer_domain infer_engine_ort_input_domain(enum infer_ep ep);
 enum infer_domain infer_engine_ort_output_domain(enum infer_ep ep);
-/* The WebGPU EP runs with graph capture: its command buffers are
- * recorded once and replayed. That is legitimate only because the
- * caller binds the same tensors every run -- a replay re-dispatches
- * the bind groups it captured. INFER_ORT_OPTS="key=value,..." appends
- * or overrides EP options for experiments. */
+/* Both GPU EPs run with graph capture (WebGPU: enableGraphCapture, CUDA:
+ * enable_cuda_graph): their command buffers are recorded once and
+ * replayed. That is legitimate only because the caller binds the same
+ * tensors every run -- a replay re-dispatches the bind groups (CUDA: the
+ * kernel arguments) it captured. The CUDA EP captures on the third run
+ * and refuses capture for a graph with a node off the CUDA EP; the
+ * adapter then creates the session again without it and says so.
+ * INFER_ORT_OPTS="key=value,..." appends or overrides EP options for
+ * experiments, in the EP's own key spelling. */
 struct infer_engine_ort* infer_engine_ort_create(struct infer_ctx* c,
                                                  enum infer_ep ep,
                                                  const char* model_path);
@@ -632,9 +793,9 @@ int infer_engine_ort_bind_output(struct infer_engine_ort* e,
                                  size_t i,
                                  const struct infer_tensor* t);
 /* Submits the inference. For the CPU EP the outputs are complete on
- * return; for the WebGPU EP they are complete only when the queue
- * reaches them -- completion is a fence, never this call returning
- * (infer_tensor_wait_ready on the consumer's tensor). */
+ * return; for the WebGPU and CUDA EPs they are complete only when the
+ * queue / stream reaches them -- completion is a fence, never this call
+ * returning (infer_tensor_wait_ready on the consumer's tensor). */
 int infer_engine_ort_run(struct infer_engine_ort* e);
 void infer_engine_ort_destroy(struct infer_engine_ort* e);
 

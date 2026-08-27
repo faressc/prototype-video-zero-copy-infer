@@ -17,6 +17,7 @@
 #ifndef HELLO_WAYLAND_SCENE_HAND_H
 #define HELLO_WAYLAND_SCENE_HAND_H
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -71,7 +72,7 @@ static inline int hand_scene_init(struct hand_scene* hs,
             "hand: %s into the detector; keys: H overlay, C cube, 1-4 effects, E clear%s\n"
             "      the window title carries the live timings (--verbose puts them here too)\n",
             hs->opt.crop ? "centre-crop" : "letterbox",
-            hand_tracker_has_both(hs->tracker) ? ", P provider" : "");
+            hand_tracker_ready_count(hs->tracker) > 1 ? ", P provider" : "");
     return 0;
 }
 
@@ -101,19 +102,20 @@ static inline void hand_scene_update(struct hand_scene* hs,
     hs->frames++;
 
     /* the P key: `app->infer_ep` is a plain counter common.c bumps, so
-     * the scene decides what it means -- here, alternate providers */
-    if (hand_tracker_has_both(hs->tracker) && app->infer_ep != hs->last_ep) {
+     * the scene decides what it means -- here, the next ready provider */
+    if (hand_tracker_ready_count(hs->tracker) > 1 && app->infer_ep != hs->last_ep) {
         hs->last_ep = app->infer_ep;
-        hand_tracker_set_ep(hs->tracker, (app->infer_ep & 1) ? INFER_EP_WEBGPU : INFER_EP_CPU);
+        hand_tracker_set_ep(hs->tracker, hand_tracker_next_ep(hs->tracker));
     }
 
     if (index >= 0) {
         struct infer_frame f;
         hand_frame_from_camera(&f, &s->cam, (uint32_t)index);
-        /* The CPU provider reads the frame through its mmap; map it once
-         * and the pointer stays good for the buffer's life. The WebGPU
-         * provider imports the fd and never needs this. */
-        if (hand_tracker_ep(hs->tracker) == INFER_EP_CPU && !f.map) {
+        /* The CPU and CUDA providers read the frame through its mmap (the
+         * C FrameToTensor); map it once and the pointer stays good for
+         * the buffer's life. The WebGPU provider imports the fd and never
+         * needs this. */
+        if (hand_tracker_ep(hs->tracker) != INFER_EP_WEBGPU && !f.map) {
             f.map = camera_map((struct camera*)&s->cam, (uint32_t)index);
         }
         if (hand_tracker_submit(hs->tracker, &f, index, (uint32_t)s->latest_seq)) {
@@ -134,11 +136,18 @@ static inline void hand_scene_update(struct hand_scene* hs,
                                 ? hs->cycle_ema + 0.1f * (hs->latest.cycle_ms - hs->cycle_ema)
                                 : hs->latest.cycle_ms;
         }
+        char epname[8];
+        const char* en = infer_ep_name(hs->latest.ep);
+        size_t ei = 0;
+        for (; en[ei] && ei + 1 < sizeof epname; ei++) {
+            epname[ei] = (char)toupper((unsigned char)en[ei]);
+        }
+        epname[ei] = '\0';
         snprintf(hs->style.readout,
                  sizeof hs->style.readout,
                  "%.1f MS %s",
                  (double)hs->cycle_ema,
-                 hs->latest.ep == INFER_EP_WEBGPU ? "WEBGPU" : "CPU");
+                 epname);
         hs->vert_count =
             hand_overlay_build(&hs->latest, hs->style, hs->verts, HAND_OVERLAY_MAX_VERTS);
     }

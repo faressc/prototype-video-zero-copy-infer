@@ -1,6 +1,7 @@
 /* infer_tensor.c -- names, descriptors, sync files, the deterministic
  * generator, the CPU domain, the foreign dma-buf domain, and the
- * per-domain dispatch for alloc / gen / wait / readback / release.
+ * per-domain dispatch for alloc / gen / wait / readback / release (the
+ * GL, VK, WGPU and CUDA domains live in their infer_ctx_*.c).
  */
 #include "infer.h"
 
@@ -27,8 +28,8 @@
 
 int infer_verbose = 0;
 
-static const char* const domain_names[INFER_DOMAIN_COUNT] = {"cpu", "gl", "vk", "wgpu", "dmabuf"};
-static const char* const ep_names[INFER_EP_COUNT] = {"cpu", "webgpu"};
+static const char* const domain_names[INFER_DOMAIN_COUNT] = {"cpu", "gl", "vk", "wgpu", "dmabuf", "cuda"};
+static const char* const ep_names[INFER_EP_COUNT] = {"cpu", "webgpu", "cuda"};
 static const char* const cost_names[] = {"ZERO_COPY", "DEVICE_COPY", "HOST_COPY", "UNAVAILABLE"};
 
 const char* infer_domain_name(enum infer_domain d) {
@@ -244,6 +245,19 @@ int infer_dmabuf_alloc(const struct infer_desc* d, struct infer_tensor* t) {
         close(a.fd);
         INFER_CHECK(0, "mmap of the dma-buf failed");
     }
+    /* The kernel zeroed these pages with ordinary cached stores, so their
+     * lines can still sit DIRTY in the CPU cache when a device writes the
+     * memory behind them -- and the next flush of those lines (the one
+     * every readback does before it reads) writes the stale zeros back
+     * over the device's bytes. Cleaning them now, before any device has
+     * seen the buffer, is the allocation-time half of the rule above: no
+     * dirty lines while a device writes. Measured on the 2080 Ti without
+     * it: every "-> dmabuf" consumer cell read zeros in part of its
+     * FIRST iteration's outputs (max error 0.36 against the reference),
+     * and only the first, because that readback's flush had cleaned the
+     * lines by the next one. On arm64 the call is a no-op and the
+     * kernel's own maintenance at attach time does this. */
+    infer_dmabuf_cpu_cache_sync(map, size);
     t->domain = INFER_DOMAIN_DMABUF;
     t->desc = *d;
     t->desc.row_pitch_bytes = d->img_w * 4; /* packed, linear */
@@ -329,6 +343,7 @@ int infer_tensor_alloc(struct infer_ctx* c,
     case INFER_DOMAIN_VK: return infer_vk_alloc(&c->vk, desc, out);
     case INFER_DOMAIN_WGPU: return infer_wgpu_alloc(&c->wgpu, desc, out);
     case INFER_DOMAIN_DMABUF: return infer_dmabuf_alloc(desc, out);
+    case INFER_DOMAIN_CUDA: return infer_cuda_alloc(&c->cuda, desc, out);
     default: return -1;
     }
 }
@@ -345,6 +360,7 @@ int infer_tensor_gen(struct infer_ctx* c,
     case INFER_DOMAIN_VK: return infer_vk_gen(&c->vk, desc, seed, out);
     case INFER_DOMAIN_WGPU: return infer_wgpu_gen(&c->wgpu, desc, seed, out);
     case INFER_DOMAIN_DMABUF: return infer_dmabuf_gen(desc, seed, out);
+    case INFER_DOMAIN_CUDA: return infer_cuda_gen(&c->cuda, desc, seed, out);
     default: return -1;
     }
 }
@@ -356,6 +372,10 @@ int infer_tensor_wait_ready(struct infer_ctx* c, struct infer_tensor* t) {
         /* no exportable fence for a plain buffer: the queue's work-done
          * future is the token, and same-queue consumers need none */
         return infer_wgpu_wait_idle(&c->wgpu);
+    case INFER_DOMAIN_CUDA:
+        /* the same shape: one stream shared with the EP, its completion
+         * is the token, and same-stream consumers need none */
+        return infer_cuda_wait_idle(&c->cuda);
     case INFER_DOMAIN_DMABUF:
         if (t->ready.sync_fd < 0) {
             /* written by the CPU through the mmap hand-over (the CPU
@@ -385,6 +405,7 @@ int infer_tensor_readback(struct infer_ctx* c, const struct infer_tensor* t, flo
     case INFER_DOMAIN_VK: return infer_vk_readback(&c->vk, t, dst);
     case INFER_DOMAIN_WGPU: return infer_wgpu_readback(&c->wgpu, t, dst);
     case INFER_DOMAIN_DMABUF: return infer_dmabuf_readback(t, dst);
+    case INFER_DOMAIN_CUDA: return infer_cuda_readback(&c->cuda, t, dst);
     default: return -1;
     }
 }
@@ -400,6 +421,7 @@ void infer_tensor_release(struct infer_ctx* c, struct infer_tensor* t) {
     case INFER_DOMAIN_VK: infer_vk_release(&c->vk, t); break;
     case INFER_DOMAIN_WGPU: infer_wgpu_release(&c->wgpu, t); break;
     case INFER_DOMAIN_DMABUF: infer_dmabuf_release(t); break;
+    case INFER_DOMAIN_CUDA: infer_cuda_release(&c->cuda, t); break;
     default: break;
     }
     infer_sync_reset(&t->ready);
@@ -417,6 +439,8 @@ int infer_ctx_init_all(struct infer_ctx* c, unsigned want) {
     memset(c, 0, sizeof *c);
     /* WebGPU first: it is the device ONNX Runtime will share */
     if ((want & INFER_WANT_WGPU) && infer_ctx_wgpu_init(&c->wgpu) == 0) { c->have |= INFER_WANT_WGPU; }
+    /* CUDA next: the other device ONNX Runtime may share (its stream) */
+    if ((want & INFER_WANT_CUDA) && infer_ctx_cuda_init(&c->cuda) == 0) { c->have |= INFER_WANT_CUDA; }
     if ((want & INFER_WANT_GL) && infer_ctx_gl_init(&c->gl, NULL) == 0) { c->have |= INFER_WANT_GL; }
     if ((want & INFER_WANT_VK) && infer_ctx_vk_init(&c->vk) == 0) { c->have |= INFER_WANT_VK; }
     if ((want & INFER_WANT_DMABUF) && infer_dmabuf_available()) { c->have |= INFER_WANT_DMABUF; }
@@ -427,6 +451,7 @@ int infer_ctx_init_all(struct infer_ctx* c, unsigned want) {
 void infer_ctx_fini_all(struct infer_ctx* c) {
     if (c->have & INFER_WANT_GL) { infer_ctx_gl_fini(&c->gl); }
     if (c->have & INFER_WANT_VK) { infer_ctx_vk_fini(&c->vk); }
+    if (c->have & INFER_WANT_CUDA) { infer_ctx_cuda_fini(&c->cuda); }
     if (c->have & INFER_WANT_WGPU) { infer_ctx_wgpu_fini(&c->wgpu); }
     c->have = 0;
 }

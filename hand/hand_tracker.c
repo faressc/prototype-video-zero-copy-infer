@@ -88,9 +88,17 @@ struct hand_tracker {
     struct provider prov[INFER_EP_COUNT];
     /* one import per camera buffer, cached for the camera's lifetime: the
      * import is the expensive part, and the six of them are the producer
-     * side of the FrameToTensor pass (the engine's tensors stay fixed) */
+     * side of the FrameToTensor pass (the engine's tensors stay fixed).
+     * Two flavours, one per device pass: Dawn's (the WebGPU EP) and the
+     * headless Vulkan one (the CUDA EP's feed). */
     struct infer_wgpu_frame_import* import[HAND_MAX_FRAME_IMPORTS];
     int import_fd[HAND_MAX_FRAME_IMPORTS];
+    struct infer_vk_frame_import* vimport[HAND_MAX_FRAME_IMPORTS];
+    int vimport_fd[HAND_MAX_FRAME_IMPORTS];
+    /* how the WebGPU provider gets its frame: 0 = not decided yet (the
+     * first frame decides), 1 = Dawn's import, 2 = the vk pass + the
+     * vk -> wgpu row (choose_wgpu_route) */
+    int wgpu_route;
 
     /* the request slot: written by the render thread, read by the worker */
     pthread_mutex_t lock;
@@ -132,8 +140,10 @@ struct hand_tracker {
 
 static void options_usage(void) {
     fprintf(stderr,
-            "  --ep cpu|webgpu|both   which execution provider (HAND_EP sets the default);\n"
-            "                         `both` builds both so P switches instantly\n"
+            "  --ep cpu|webgpu|cuda|both|all\n"
+            "                         which execution provider (HAND_EP sets the default);\n"
+            "                         `both` builds cpu + webgpu, `all` every provider that\n"
+            "                         comes up -- extras stand ready so P switches instantly\n"
             "  --crop / --letterbox   how the frame reaches the 192x192 detector. Crop is the\n"
             "                         default: MediaPipe letterboxes, but on a 16:9 camera that\n"
             "                         spends 84 of 192 rows on bars (score 0.26 vs 0.76 here)\n"
@@ -214,8 +224,10 @@ int hand_options_parse(int argc, char** argv, struct hand_options* o) {
     if (env) {
         if (!strcmp(env, "both")) {
             o->both = 1;
+        } else if (!strcmp(env, "all")) {
+            o->all = 1;
         } else if (infer_ep_parse(env, &o->ep) < 0) {
-            fprintf(stderr, "HAND_EP must be cpu, webgpu or both\n");
+            fprintf(stderr, "HAND_EP must be cpu, webgpu, cuda, both or all\n");
             return -1;
         }
     }
@@ -225,6 +237,9 @@ int hand_options_parse(int argc, char** argv, struct hand_options* o) {
         if (!strcmp(s, "--ep") && v) {
             if (!strcmp(v, "both")) {
                 o->both = 1;
+                o->ep = INFER_EP_CPU;
+            } else if (!strcmp(v, "all")) {
+                o->all = 1;
                 o->ep = INFER_EP_CPU;
             } else if (infer_ep_parse(v, &o->ep) < 0) {
                 options_usage();
@@ -339,12 +354,47 @@ static struct infer_wgpu_frame_import* import_for(struct hand_tracker* h,
     return h->import[index];
 }
 
+static struct infer_vk_frame_import* import_for_vk(struct hand_tracker* h,
+                                                   const struct infer_frame* f,
+                                                   int index) {
+    if (index < 0 || index >= HAND_MAX_FRAME_IMPORTS) { return NULL; }
+    if (h->vimport[index] && h->vimport_fd[index] == f->dmabuf_fd[0]) { return h->vimport[index]; }
+    if (h->vimport[index]) { infer_vk_frame_import_destroy(h->vimport[index]); }
+    struct infer_frame idesc = hand_frame_import_desc(f);
+    h->vimport[index] = infer_vk_frame_import_create(&h->ctx.vk, &idesc);
+    h->vimport_fd[index] = f->dmabuf_fd[0];
+    return h->vimport[index];
+}
+
 static int feed(struct hand_model* m,
                 struct infer_wgpu_frame_import* im,
+                struct infer_vk_frame_import* vim,
                 const struct infer_frame* f,
                 struct hand_affine a) {
-    return hand_model_ep(m) == INFER_EP_WEBGPU ? hand_model_feed_wgpu(m, im, f, a)
-                                               : hand_model_feed_cpu(m, f, a);
+    if (hand_model_wants_vk_frame(m)) { return hand_model_feed_vk(m, vim, f, a); }
+    if (hand_model_ep(m) == INFER_EP_WEBGPU) { return hand_model_feed_wgpu(m, im, f, a); }
+    return hand_model_feed_cpu(m, f, a);
+}
+
+/* Dawn's import of the frame, or the Vulkan pass with the registry's
+ * vk -> wgpu row behind it? Decided at the first frame, because that is
+ * when the frame's layout is known, and decided on OUR Vulkan device
+ * first: Dawn's import of a frame this driver refuses (NVIDIA 610.43,
+ * every linear NV12 layout) does not fail, it aborts the process or
+ * loses the device. Where the probe cannot tell -- a single-plane frame,
+ * no Vulkan domain -- Dawn's import is attempted as before. */
+static int choose_wgpu_route(struct hand_tracker* h, struct provider* p, const struct infer_frame* f) {
+    struct infer_frame idesc = hand_frame_import_desc(f);
+    if (infer_vk_frame_multiplanar_importable(&h->ctx.vk, &idesc) != 0) { return 1; }
+    if (hand_model_use_vk_feed(p->palm) < 0 || (p->lmk && hand_model_use_vk_feed(p->lmk) < 0)) {
+        fprintf(stderr,
+                "hand: the driver refuses Dawn's frame import and the vk feed is unavailable; "
+                "attempting Dawn's import regardless\n");
+        return 1;
+    }
+    fprintf(stderr, "hand: the driver refuses Dawn's frame import; the webgpu provider is fed by "
+                    "the vk pass + vk -> wgpu edge\n");
+    return 2;
 }
 
 /* detector pixels -> frame pixels. The fit affine has no rotation and no
@@ -467,13 +517,19 @@ static void one_cycle(struct hand_tracker* h, const struct infer_frame* f, int i
     }
 
     struct infer_wgpu_frame_import* im = NULL;
+    struct infer_vk_frame_import* vim = NULL;
     const int gpu = ep == INFER_EP_WEBGPU;
-    if (gpu) {
+    if (gpu && h->wgpu_route == 0) { h->wgpu_route = choose_wgpu_route(h, p, f); }
+    if (gpu && h->wgpu_route == 1) {
         im = import_for(h, f, index);
         if (!im) { return; }
         /* one access bracket for the cycle: every FrameToTensor pass in it
          * reads the same frame, which is why begin and end are separate */
         if (infer_wgpu_frame_begin(&h->ctx.wgpu, im, -1) < 0) { return; }
+    }
+    if (hand_model_wants_vk_frame(p->palm)) {
+        vim = import_for_vk(h, f, index);
+        if (!vim) { return; }
     }
 
     struct hand_results res;
@@ -492,7 +548,7 @@ static void one_cycle(struct hand_tracker* h, const struct infer_frame* f, int i
     if (want_detect) {
         struct hand_det det[64];
         const uint64_t a0 = infer_now_ns();
-        if (feed(p->palm, im, f, h->fit) < 0) { goto done; }
+        if (feed(p->palm, im, vim, f, h->fit) < 0) { goto done; }
         const uint64_t a1 = infer_now_ns();
         if (hand_model_run(p->palm) < 0) { goto done; }
         const uint64_t a2 = infer_now_ns();
@@ -531,7 +587,7 @@ static void one_cycle(struct hand_tracker* h, const struct infer_frame* f, int i
                                                       rects[r].rot, HAND_LANDMARK_SIDE,
                                                       HAND_LANDMARK_SIDE);
             const uint64_t b0 = infer_now_ns();
-            if (feed(p->lmk, im, f, crop) < 0) { goto done; }
+            if (feed(p->lmk, im, vim, f, crop) < 0) { goto done; }
             const uint64_t b1 = infer_now_ns();
             if (hand_model_run(p->lmk) < 0) { goto done; }
             const uint64_t b2 = infer_now_ns();
@@ -627,8 +683,35 @@ done:
 }
 
 
+/* The first Run of a session pays what create() deferred: the CUDA EP's
+ * per-thread cuBLAS/cuDNN context (created lazily on the running thread,
+ * which is why this happens HERE and not in create()) and, on its third
+ * run, the graph capture with its one hidden stream sync; the WebGPU
+ * EP's shader compilation and capture likewise. Pay it before the first
+ * frame -- the landmark model otherwise pays it the first time a hand
+ * appears, as a one-frame freeze. The input is whatever the fresh
+ * allocation contains; the models do not care and nothing reads the
+ * outputs. */
+static void warm_up(struct hand_tracker* h) {
+    for (int e = 0; e < INFER_EP_COUNT; e++) {
+        struct provider* p = &h->prov[e];
+        if (!p->ready || e == INFER_EP_CPU) { continue; }
+        for (int i = 0; i < 3; i++) {
+            struct hand_model* mm[2] = {p->palm, p->lmk};
+            for (int m = 0; m < 2; m++) {
+                if (!mm[m]) { continue; }
+                if (hand_model_run(mm[m]) < 0 || hand_model_sync(mm[m]) < 0) {
+                    fprintf(stderr, "hand: %s warm-up failed\n", infer_ep_name((enum infer_ep)e));
+                    return;
+                }
+            }
+        }
+    }
+}
+
 static void* worker(void* arg) {
     struct hand_tracker* h = arg;
+    warm_up(h);
     for (;;) {
         struct infer_frame f;
         int index;
@@ -688,41 +771,66 @@ struct hand_tracker* hand_tracker_create(const struct hand_options* o,
     h->busy_index = -1;
     atomic_store(&h->holds_index, -1);
     atomic_store(&h->want_ep, (int)o->ep);
-    for (int i = 0; i < HAND_MAX_FRAME_IMPORTS; i++) { h->import_fd[i] = -1; }
+    for (int i = 0; i < HAND_MAX_FRAME_IMPORTS; i++) {
+        h->import_fd[i] = -1;
+        h->vimport_fd[i] = -1;
+    }
     pthread_mutex_init(&h->lock, NULL);
     pthread_mutex_init(&h->stat_lock, NULL);
     pthread_cond_init(&h->wake, NULL);
     h->fit = o->crop ? hand_affine_square_crop(frame_w, frame_h, HAND_DETECT_SIDE, HAND_DETECT_SIDE)
                      : hand_affine_letterbox(frame_w, frame_h, HAND_DETECT_SIDE, HAND_DETECT_SIDE);
 
-    /* The WebGPU domain is all stage five needs: the frame arrives as a
-     * dma-buf and the results leave as host floats, so the presenter's
-     * EGL context and VkDevice are never touched. */
-    const int want_gpu = o->both || o->ep == INFER_EP_WEBGPU;
-    infer_ctx_init_all(&h->ctx, want_gpu ? INFER_WANT_WGPU : 0u);
+    /* Which providers are wanted, and which memory domains that needs.
+     * The frame arrives as a dma-buf and the results leave as host
+     * floats, so the presenter's EGL context and VkDevice are never
+     * touched -- only the wanted EPs' own domains come up. */
+    int need[INFER_EP_COUNT] = {0};
+    need[o->ep] = 1;
+    if (o->both) { need[INFER_EP_CPU] = need[INFER_EP_WEBGPU] = 1; }
+    if (o->all) {
+        for (int e = 0; e < INFER_EP_COUNT; e++) { need[e] = 1; }
+    }
+    unsigned want = 0;
+    for (int e = 0; e < INFER_EP_COUNT; e++) {
+        const enum infer_domain dom = infer_engine_ort_input_domain((enum infer_ep)e);
+        if (need[e] && dom != INFER_DOMAIN_CPU) { want |= 1u << dom; }
+        /* the CUDA EP's frame pass runs on the Vulkan device, and the
+         * WebGPU EP needs that device too: to ask, before Dawn is handed
+         * the frame, whether this driver imports it at all, and as the
+         * feed when it does not (choose_wgpu_route). Best effort --
+         * absent, CUDA falls back to the host feed and Dawn's import is
+         * simply attempted */
+        if (need[e] && (e == INFER_EP_CUDA || e == INFER_EP_WEBGPU)) { want |= INFER_WANT_VK; }
+    }
+    infer_ctx_init_all(&h->ctx, want);
     infer_registry_init(&h->reg);
     infer_registry_probe(&h->reg, &h->ctx);
 
-    if (want_gpu && !(h->ctx.have & INFER_WANT_WGPU)) {
-        fprintf(stderr, "hand: no WebGPU domain; falling back to the CPU provider\n");
-        h->opt.both = 0;
-        h->opt.ep = INFER_EP_CPU;
-        atomic_store(&h->want_ep, (int)INFER_EP_CPU);
+    /* an EP whose domain did not come up is dropped, per EP; the CPU
+     * provider is the floor and always can */
+    for (int e = 0; e < INFER_EP_COUNT; e++) {
+        const enum infer_domain dom = infer_engine_ort_input_domain((enum infer_ep)e);
+        if (need[e] && dom != INFER_DOMAIN_CPU && !(h->ctx.have & (1u << dom))) {
+            fprintf(stderr, "hand: no %s domain; dropping the %s provider\n",
+                    infer_domain_name(dom), infer_ep_name((enum infer_ep)e));
+            need[e] = 0;
+        }
+    }
+    {
+        int any = 0;
+        for (int e = 0; e < INFER_EP_COUNT; e++) { any |= need[e]; }
+        if (!any) { need[INFER_EP_CPU] = 1; }
     }
 
-    /* Both providers up front when asked, because graph capture pins the
+    /* Every wanted provider up front, because graph capture pins the
      * tensors inside a session: an EP switch cannot rebuild them, so the
-     * only way to make P instant is to have both already standing. */
-    const int need_cpu = h->opt.both || h->opt.ep == INFER_EP_CPU;
-    const int need_gpu = (h->opt.both || h->opt.ep == INFER_EP_WEBGPU) &&
-                         (h->ctx.have & INFER_WANT_WGPU);
-    if (need_cpu && build_provider(h, INFER_EP_CPU) < 0) {
-        hand_tracker_destroy(h);
-        return NULL;
-    }
-    if (need_gpu && build_provider(h, INFER_EP_WEBGPU) < 0) {
-        hand_tracker_destroy(h);
-        return NULL;
+     * only way to make P instant is to have them all already standing. */
+    for (int e = 0; e < INFER_EP_COUNT; e++) {
+        if (need[e] && build_provider(h, (enum infer_ep)e) < 0) {
+            hand_tracker_destroy(h);
+            return NULL;
+        }
     }
     if (!h->prov[atomic_load(&h->want_ep)].ready) {
         /* asked for webgpu, only cpu came up (or vice versa) */
@@ -757,6 +865,7 @@ void hand_tracker_destroy(struct hand_tracker* h) {
     /* the imports hold dup'd fds and must go before the device */
     for (int i = 0; i < HAND_MAX_FRAME_IMPORTS; i++) {
         infer_wgpu_frame_import_destroy(h->import[i]);
+        infer_vk_frame_import_destroy(h->vimport[i]);
     }
     for (int e = 0; e < INFER_EP_COUNT; e++) {
         hand_model_destroy(h->prov[e].lmk);
@@ -824,8 +933,19 @@ enum infer_ep hand_tracker_ep(const struct hand_tracker* h) {
     return (enum infer_ep)atomic_load(&h->want_ep);
 }
 
-int hand_tracker_has_both(const struct hand_tracker* h) {
-    return h->prov[INFER_EP_CPU].ready && h->prov[INFER_EP_WEBGPU].ready;
+int hand_tracker_ready_count(const struct hand_tracker* h) {
+    int n = 0;
+    for (int e = 0; e < INFER_EP_COUNT; e++) { n += h->prov[e].ready; }
+    return n;
+}
+
+enum infer_ep hand_tracker_next_ep(const struct hand_tracker* h) {
+    const int cur = atomic_load(&h->want_ep);
+    for (int i = 1; i <= INFER_EP_COUNT; i++) {
+        const int e = (cur + i) % INFER_EP_COUNT;
+        if (h->prov[e].ready) { return (enum infer_ep)e; }
+    }
+    return (enum infer_ep)cur;
 }
 
 int hand_tracker_stats_line(const struct hand_tracker* h, char* buf, size_t n) {

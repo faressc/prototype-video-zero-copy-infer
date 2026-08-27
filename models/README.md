@@ -26,4 +26,7 @@ shapes). `python3 models/make_synthetic.py` needs only `onnx`.
 The MediaPipe models are Apache-2.0 (Google). The tf2onnx conversion
 keeps the NHWC input and inserts transposes in front of the convolutions;
 ONNX Runtime's WebGPU EP is told `preferredLayout=NHWC` so it can fold
-them back.
+them back. The CUDA EP's kernels are NCHW by default, so there the
+transposes actually run; ORT carries NHWC CUDA kernels behind the
+`prefer_nhwc=1` provider option (`INFER_ORT_OPTS=prefer_nhwc=1`) — worth
+measuring before making it the default.

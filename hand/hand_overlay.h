@@ -58,6 +58,7 @@ enum {
 
 #define HAND_COL_BONE_CPU hand_rgba(0x30, 0xE0, 0xFF, 0xFF) /* cyan */
 #define HAND_COL_BONE_GPU hand_rgba(0xFF, 0xC0, 0x20, 0xFF) /* amber */
+#define HAND_COL_BONE_CUDA hand_rgba(0x76, 0xE6, 0x20, 0xFF) /* green */
 #define HAND_COL_JOINT hand_rgba(0xFF, 0xFF, 0xFF, 0xFF)
 #define HAND_COL_BOX hand_rgba(0x60, 0xFF, 0x60, 0xA0)
 #define HAND_COL_KP hand_rgba(0xFF, 0x60, 0xFF, 0xFF)
@@ -117,9 +118,10 @@ static const struct hand_glyph hand_font[] = {
     {'0', {7, 5, 5, 5, 7}}, {'1', {2, 6, 2, 2, 7}}, {'2', {7, 1, 7, 4, 7}}, {'3', {7, 1, 7, 1, 7}},
     {'4', {5, 5, 7, 1, 1}}, {'5', {7, 4, 7, 1, 7}}, {'6', {7, 4, 7, 5, 7}}, {'7', {7, 1, 1, 1, 1}},
     {'8', {7, 5, 7, 5, 7}}, {'9', {7, 5, 7, 1, 7}}, {'.', {0, 0, 0, 0, 2}}, {':', {0, 2, 0, 2, 0}},
-    {'/', {1, 1, 2, 4, 4}}, {'B', {6, 5, 6, 5, 6}}, {'C', {7, 4, 4, 4, 7}}, {'D', {6, 5, 5, 5, 6}},
-    {'E', {7, 4, 7, 4, 7}}, {'G', {7, 4, 5, 5, 7}}, {'M', {5, 7, 7, 5, 5}}, {'P', {7, 5, 7, 4, 4}},
-    {'S', {7, 4, 7, 1, 7}}, {'T', {7, 2, 2, 2, 2}}, {'U', {5, 5, 5, 5, 7}}, {'W', {5, 5, 5, 7, 5}},
+    {'/', {1, 1, 2, 4, 4}}, {'A', {7, 5, 7, 5, 5}}, {'B', {6, 5, 6, 5, 6}}, {'C', {7, 4, 4, 4, 7}},
+    {'D', {6, 5, 5, 5, 6}}, {'E', {7, 4, 7, 4, 7}}, {'G', {7, 4, 5, 5, 7}}, {'M', {5, 7, 7, 5, 5}},
+    {'P', {7, 5, 7, 4, 4}}, {'S', {7, 4, 7, 1, 7}}, {'T', {7, 2, 2, 2, 2}}, {'U', {5, 5, 5, 5, 7}},
+    {'W', {5, 5, 5, 7, 5}},
 };
 
 static inline int hand_overlay_push(struct hand_vert* out,
@@ -285,7 +287,9 @@ static inline int hand_overlay_build(const struct hand_results* r,
         n = hand_overlay_quad(out, n, max, 0.06f, 0.06f, 0.02f, st.aspect, HAND_COL_CALIB_TL);
     }
     if (!r || r->count <= 0) { return n; }
-    const uint32_t bone = r->ep == INFER_EP_WEBGPU ? HAND_COL_BONE_GPU : HAND_COL_BONE_CPU;
+    const uint32_t bone = r->ep == INFER_EP_WEBGPU ? HAND_COL_BONE_GPU
+                          : r->ep == INFER_EP_CUDA ? HAND_COL_BONE_CUDA
+                                                   : HAND_COL_BONE_CPU;
 
     for (int hi = 0; hi < r->count && hi < HAND_MAX; hi++) {
         const struct hand_result* h = &r->hand[hi];

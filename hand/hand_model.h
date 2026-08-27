@@ -44,13 +44,35 @@ struct hand_model* hand_model_create(struct infer_ctx* ctx,
 void hand_model_destroy(struct hand_model* m);
 
 /* Fill the engine's input from a frame through `a`. Which one to call is
- * decided by the model's EP: the CPU EP wants the frame's mmap, the
- * WebGPU EP wants an import inside an open access bracket. */
+ * decided by the model's EP: the CPU and CUDA EPs want the frame's mmap
+ * (the C pass writes host memory; for CUDA it writes a host staging
+ * tensor and the registry's cpu -> cuda row moves it), the WebGPU EP
+ * wants an import inside an open access bracket. */
 int hand_model_feed_cpu(struct hand_model* m, const struct infer_frame* f, struct hand_affine a);
 int hand_model_feed_wgpu(struct hand_model* m,
                          struct infer_wgpu_frame_import* im,
                          const struct infer_frame* f,
                          struct hand_affine a);
+/* The CUDA EP's device feed, when the model came up with it (a Vulkan
+ * pass writing the opaque-fd buffer the session has bound): ask
+ * hand_model_wants_vk_frame, and hand it a frame imported with
+ * infer_vk_frame_import_create. Falls back to feed_cpu (the C pass +
+ * H2D) when it did not. */
+int hand_model_wants_vk_frame(const struct hand_model* m);
+int hand_model_feed_vk(struct hand_model* m,
+                       struct infer_vk_frame_import* im,
+                       const struct infer_frame* f,
+                       struct hand_affine a);
+/* A WebGPU model fed by the Vulkan pass instead of Dawn's own import of
+ * the frame: the route for a driver that refuses that import -- ask
+ * infer_vk_frame_multiplanar_importable BEFORE any Dawn import, because
+ * Dawn does not survive the refusal (NVIDIA 610.43 refuses every linear
+ * NV12 layout). The pass writes a VK tensor and the registry's vk ->
+ * wgpu row (dmabuf_import: one relayout pass on Dawn's queue) moves it
+ * into the session's fixed input buffer, so graph capture is untouched.
+ * Afterwards hand_model_wants_vk_frame is true and feed_vk is the call.
+ * Needs the Vulkan domain up; -1 when it is not or the row is missing. */
+int hand_model_use_vk_feed(struct hand_model* m);
 
 /* Bind and submit. Returns when the work is SUBMITTED -- for the WebGPU
  * EP the outputs are not readable yet, which is the whole point of the
@@ -67,7 +89,8 @@ const float* hand_model_output(const struct hand_model* m, int i);
 size_t hand_model_output_count(const struct hand_model* m);
 size_t hand_model_output_elements(const struct hand_model* m, int i);
 enum infer_ep hand_model_ep(const struct hand_model* m);
-/* What the out-edge cost, for the timing line: "identity" or "map_read". */
+/* What the out-edge cost, for the timing line: "identity", "map_read"
+ * or "memcpy_d2h". */
 const char* hand_model_out_edge(const struct hand_model* m);
 
 #endif

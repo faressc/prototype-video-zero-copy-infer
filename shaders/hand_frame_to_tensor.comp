@@ -1,0 +1,129 @@
+// hand_frame_to_tensor.comp -- FrameToTensor on the headless Vulkan
+// device: the camera's dma-buf planes, imported as single-plane images,
+// resampled through an affine into a packed float SSBO -- either a VK
+// tensor's buffer alias, or the opaque-fd buffer the CUDA EP reads
+// through its mapping (hand/hand_frame_vk.c).
+//
+// A line-by-line port of hand_frame_to_tensor.wgsl, which is itself
+// formula-identical to hand_frame_cpu.c: same bilinear convention
+// (pixel k covers [k, k+1), centre at k+0.5), same clamp-to-edge, same
+// chroma coordinates (half of luma's), same nv12_yuv_params numbers.
+// hello_hand --compare-frame-to-tensor holds all three to 1/255.
+//
+// texelFetch, not texture(): the sampler state never participates, the
+// bilinear tap is written out, and the three implementations stay
+// formula-identical rather than approximately similar.
+
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// plane 0: NV12 luma (R8) or, in YUYV mode, the packed plane as
+// half-width RGBA (texel = Y0,U,Y1,V). plane 1: NV12 chroma (RG8, half
+// size); in YUYV mode plane 0 again, because the set must be complete.
+layout(binding = 0) uniform sampler2D plane0;
+layout(binding = 1) uniform sampler2D plane1;
+layout(binding = 2, std430) buffer OutTensor { float out_tensor[]; };
+
+// mirrors struct pass_params in hand_frame_vk.c: five vec4s, 80 bytes,
+// inside the 128-byte push-constant minimum
+layout(push_constant) uniform Params {
+    vec4 affine;  // m0 m1 m3 m4
+    vec4 extra;   // m2, m5, norm lo, norm span
+    uvec4 sizes;  // tensor w, tensor h, frame w, frame h
+    vec4 coef;    // r<-v, g<-u, g<-v, b<-u
+    vec4 range_;  // y offset, y scale, chroma scale, unused
+    uvec4 flags;  // x: 1 = YUYV packed, y: 1 = BORDER_REPLICATE
+} p;
+
+// One bilinear tap. `dim` is the plane's size in samples, `q` a
+// continuous image coordinate in that plane's own scale.
+vec4 tap0(vec2 q, ivec2 dim) {
+    vec2 f = q - vec2(0.5, 0.5);
+    vec2 i0 = floor(f);
+    vec2 a = f - i0;
+    ivec2 lo = ivec2(i0);
+    ivec2 c0 = clamp(lo, ivec2(0, 0), dim - ivec2(1, 1));
+    ivec2 c1 = clamp(lo + ivec2(1, 1), ivec2(0, 0), dim - ivec2(1, 1));
+    vec4 t00 = texelFetch(plane0, ivec2(c0.x, c0.y), 0);
+    vec4 t10 = texelFetch(plane0, ivec2(c1.x, c0.y), 0);
+    vec4 t01 = texelFetch(plane0, ivec2(c0.x, c1.y), 0);
+    vec4 t11 = texelFetch(plane0, ivec2(c1.x, c1.y), 0);
+    return mix(mix(t00, t10, a.x), mix(t01, t11, a.x), a.y);
+}
+
+vec4 tap1(vec2 q, ivec2 dim) {
+    vec2 f = q - vec2(0.5, 0.5);
+    vec2 i0 = floor(f);
+    vec2 a = f - i0;
+    ivec2 lo = ivec2(i0);
+    ivec2 c0 = clamp(lo, ivec2(0, 0), dim - ivec2(1, 1));
+    ivec2 c1 = clamp(lo + ivec2(1, 1), ivec2(0, 0), dim - ivec2(1, 1));
+    vec4 t00 = texelFetch(plane1, ivec2(c0.x, c0.y), 0);
+    vec4 t10 = texelFetch(plane1, ivec2(c1.x, c0.y), 0);
+    vec4 t01 = texelFetch(plane1, ivec2(c0.x, c1.y), 0);
+    vec4 t11 = texelFetch(plane1, ivec2(c1.x, c1.y), 0);
+    return mix(mix(t00, t10, a.x), mix(t01, t11, a.x), a.y);
+}
+
+void main() {
+    uint tw = p.sizes.x;
+    uint th = p.sizes.y;
+    if (gl_GlobalInvocationID.x >= tw || gl_GlobalInvocationID.y >= th) { return; }
+
+    int fw = int(p.sizes.z);
+    int fh = int(p.sizes.w);
+    float lo = p.extra.z;
+    float span = p.extra.w;
+    uint base = (gl_GlobalInvocationID.y * tw + gl_GlobalInvocationID.x) * 3u;
+
+    // destination pixel centre -> frame pixel coordinate
+    float u = float(gl_GlobalInvocationID.x) + 0.5;
+    float v = float(gl_GlobalInvocationID.y) + 0.5;
+    float x = p.affine.x * u + p.affine.y * v + p.extra.x;
+    float y = p.affine.z * u + p.affine.w * v + p.extra.y;
+
+    // Outside the frame: black for the detector (BORDER_ZERO, its
+    // letterbox bars), nearest edge pixel for the landmark crop
+    // (BORDER_REPLICATE) -- the taps already clamp, so REPLICATE is
+    // simply not taking this branch. See hand/hand_frame.h.
+    if (p.flags.y == 0u && (x < 0.0 || y < 0.0 || x >= float(fw) || y >= float(fh))) {
+        out_tensor[base + 0u] = lo;
+        out_tensor[base + 1u] = lo;
+        out_tensor[base + 2u] = lo;
+        return;
+    }
+
+    // unorm8 texels arrive in [0,1]; the coefficients are in 0..255 units
+    float yy;
+    float uu;
+    float vv;
+    if (p.flags.x == 0u) {
+        // NV12: luma at full resolution, chroma at half in both axes
+        yy = tap0(vec2(x, y), ivec2(fw, fh)).r * 255.0;
+        vec4 ch = tap1(vec2(x * 0.5, y * 0.5), ivec2(fw / 2, fh / 2));
+        uu = ch.r * 255.0;
+        vv = ch.g * 255.0;
+    } else {
+        // YUYV as half-width RGBA: texel = (Y0, U, Y1, V). Nearest by
+        // construction -- interpolating across a pair boundary would mix
+        // Y0 with Y1 -- so the parity pick is exact, as in the C twin.
+        int xi = min(int(x), fw - 1);
+        int yi = min(int(y), fh - 1);
+        vec4 t = texelFetch(plane0, ivec2(xi / 2, yi), 0);
+        yy = ((xi & 1) == 1 ? t.b : t.r) * 255.0;
+        uu = t.g * 255.0;
+        vv = t.a * 255.0;
+    }
+
+    yy = (yy - p.range_.x) * p.range_.y;
+    uu = (uu - 128.0) * p.range_.z;
+    vv = (vv - 128.0) * p.range_.z;
+    vec3 rgb = clamp(vec3(yy + p.coef.x * vv,
+                          yy - p.coef.y * uu - p.coef.z * vv,
+                          yy + p.coef.w * uu) * (1.0 / 255.0),
+                     vec3(0.0), vec3(1.0));
+    out_tensor[base + 0u] = lo + rgb.r * span;
+    out_tensor[base + 1u] = lo + rgb.g * span;
+    out_tensor[base + 2u] = lo + rgb.b * span;
+}

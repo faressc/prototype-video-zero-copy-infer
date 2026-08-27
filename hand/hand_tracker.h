@@ -42,7 +42,8 @@ enum { HAND_MAX_FRAME_IMPORTS = 8 };
 
 struct hand_options {
     enum infer_ep ep; /* the provider in use */
-    int both;         /* build both up front so P can switch instantly */
+    int both;         /* build cpu + webgpu up front so P can switch instantly */
+    int all;          /* build every provider that comes up */
     int crop;         /* square-crop the frame instead of letterboxing it */
     int detect_only;  /* skip the landmark stage */
     int num_hands;    /* MediaPipe's num_hands: gates the detector (see --hands) */
@@ -59,7 +60,7 @@ struct hand_options {
     const char* lmk_model;
 };
 
-/* --ep cpu|webgpu|both, --crop, --detect-only, --detect-every N,
+/* --ep cpu|webgpu|cuda|both|all, --crop, --detect-only, --detect-every N,
  * --palm/--landmark PATH, --full, --verbose. HAND_EP=... supplies the
  * default, matching the camera's CAM_DEVICE / CAM_SIZE knobs. Returns 0,
  * or -1 after printing usage. */
@@ -114,12 +115,15 @@ int hand_tracker_poll(struct hand_tracker* h, struct hand_results* out);
 /* 1 while the worker may still be reading camera buffer `index`. */
 int hand_tracker_holds(const struct hand_tracker* h, int index);
 
-/* The live switch. Only meaningful when the tracker was built with
- * `both`; takes effect on the next cycle, and the in-flight one is
- * finished on the old provider rather than abandoned. */
+/* The live switch. Only meaningful when more than one provider stands
+ * (`both` / `all`); takes effect on the next cycle, and the in-flight
+ * one is finished on the old provider rather than abandoned. */
 void hand_tracker_set_ep(struct hand_tracker* h, enum infer_ep ep);
 enum infer_ep hand_tracker_ep(const struct hand_tracker* h);
-int hand_tracker_has_both(const struct hand_tracker* h);
+/* how many providers stand ready (P cycles them when > 1), and the next
+ * ready one after the current -- what the P key maps to */
+int hand_tracker_ready_count(const struct hand_tracker* h);
+enum infer_ep hand_tracker_next_ep(const struct hand_tracker* h);
 
 /* One line of medians for stderr and the window title, in
  * hello_inference's vocabulary. Returns the length written. */
